@@ -7,6 +7,7 @@
   const C = window.Core;
   const L = window.Looks;
   const A = window.Art;
+  const K = window.Kuni;
 
   const VERSION = 'v0.1';
   const SAVE_KEY = 'zassou.save.v1';
@@ -21,7 +22,10 @@
     btnFree: $('btnFree'), btnOne: $('btnOne'), btnTen: $('btnTen'), btnRates: $('btnRates'),
     albumHave: $('albumHave'), albumAll: $('albumAll'), albumBar: $('albumBar'),
     filters: $('filters'), albumGrid: $('albumGrid'),
-    gachaDot: $('gachaDot'), albumDot: $('albumDot'),
+    gachaDot: $('gachaDot'), albumDot: $('albumDot'), kuniDot: $('kuniDot'),
+    kuniName: $('kuniName'), kuniLv: $('kuniLv'), kuniTiles: $('kuniTiles'), kuniPeople: $('kuniPeople'),
+    taxBtn: $('taxBtn'), taxFill: $('taxFill'), taxNow: $('taxNow'), taxCap: $('taxCap'), taxGo: $('taxGo'),
+    kuniMap: $('kuniMap'), kuniRate: $('kuniRate'), sheet: $('sheet'),
     reveal: $('reveal'), revealCount: $('revealCount'), revealSkip: $('revealSkip'),
     revealStage: $('revealStage'), revealHint: $('revealHint'), revealActions: $('revealActions'),
     revealNext: $('revealNext'), revealSummary: $('revealSummary'), summaryGrid: $('summaryGrid'),
@@ -33,7 +37,9 @@
 
   // ---------------------------------------------------------------- 保存と読み込み
   function load() {
-    try { return C.deserialize(localStorage.getItem(SAVE_KEY)); } catch (e) { return C.newState(); }
+    let s;
+    try { s = C.deserialize(localStorage.getItem(SAVE_KEY)); } catch (e) { s = C.newState(); }
+    return K.normalize(s);
   }
   let saveTimer = 0;
   function saveNow() {
@@ -47,6 +53,8 @@
   }
 
   let S = load();
+  let nowOverride = null;    // テスト用: 時計を差し替える
+  const now = function () { return nowOverride !== null ? nowOverride : Date.now(); };
   let rngOverride = null;
   let todayOverride = null;
   const rng = function () { return rngOverride ? rngOverride() : Math.random(); };
@@ -68,6 +76,7 @@
     albumDirty = true;
     if (homeChanged) renderHome();
     if (currentScreen === 'albumScreen') renderAlbum();
+    if (currentScreen === 'kuniScreen') { renderKuni(); refreshSheet(); }
   }
 
   // ---------------------------------------------------------------- 小さな道具
@@ -138,6 +147,8 @@
     els.gachaDot.hidden = !C.freeAvailable(S, today());
     els.albumDot.hidden = !C.CARDS.some(function (c) { return C.isNewCard(S, c.id); });
     els.freeBanner.hidden = !C.freeAvailable(S, today());
+    const tax = K.pending(S, now());
+    els.kuniDot.hidden = !(tax >= 10 && tax >= K.capacity(S) * 0.5);
   }
   function bump(el) {
     el.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.22)' }, { transform: 'scale(1)' }], { duration: 320, easing: 'ease-out' });
@@ -374,6 +385,214 @@
     card.classList.remove('tilt');
     card.style.setProperty('--rx', '0');
     card.style.setProperty('--ry', '0');
+  }
+
+  // ---------------------------------------------------------------- くに
+  const LAND_NAME = { yakusho: 'やくしょ', nohara: 'のはら', oka: 'おか', mori: 'もり', mizu: 'みずうみ', hana: 'はなばたけ' };
+  let kuniSig = '';
+  let sel = null;                 // 選んでいるマス { x, y }
+  const fmt = function (n) { return String(Math.round(n * 10) / 10); };
+  const pct = function (n) { return '+' + Math.round(n * 100) + '%'; };
+  const shortName = function (card) { return card.name.replace(' ざっそう', ''); };
+
+  function thumbSvg(id) { return A.zassou(L.lookOf(id)); }
+
+  function tileHtml(x, y) {
+    const st = K.statusOf(S, x, y);
+    const type = K.typeAt(x, y);
+    let inner = '';
+    const cls = 'tile';
+    if (st === 'owned') {
+      const t = S.kuni.tiles[K.key(x, y)];
+      inner = '<div class="ground">' + A.tile(type, x, y) + '</div>';
+      if (t.res) {
+        inner += '<div class="res">' + thumbSvg(t.res) + '</div><span class="bonus">' + pct(K.residentBonus(S, t.res)) + '</span>';
+      }
+    } else if (st === 'buy') {
+      const price = K.canBuy(S, x, y).price;
+      inner = '<div class="ground">' + A.tile(type, x, y) + '</div><span class="price' + (S.coins >= price ? '' : ' poor') + '"><span class="coin"></span>' + price + '</span>';
+    } else {
+      inner = '<div class="ground"></div>';
+    }
+    const label = st === 'owned' ? LAND_NAME[type] : st === 'buy' ? 'かえる とち' : 'まだ ひらけない とち';
+    return '<button type="button" class="' + cls + '" data-x="' + x + '" data-y="' + y + '" data-s="' + st + '" aria-label="' + label + '">' + inner + '</button>';
+  }
+
+  function renderKuni() {
+    const lv = K.levelOf(S);
+    els.kuniName.textContent = lv.title;
+    els.kuniLv.textContent = 'Lv.' + S.kuni.lv;
+    els.kuniTiles.textContent = String(K.tileCount(S));
+    els.kuniPeople.textContent = String(K.peopleCount(S));
+    const rate = K.ratePerHour(S);
+    els.kuniRate.innerHTML = '1じかんで <b>+' + fmt(rate) + '</b> コイン<small>ためておけるのは ' + lv.hours + 'じかんぶん (' + Math.floor(K.capacity(S)) + 'コイン)</small>';
+    const sig = JSON.stringify([S.kuni.lv, S.kuni.tiles, Math.floor(S.coins / 5), S.owned]);   // 選んだマスは入れない (枠は class だけ付け替える)
+    if (sig !== kuniSig) {
+      kuniSig = sig;
+      let h = '';
+      for (let y = 0; y < K.SIZE; y++) for (let x = 0; x < K.SIZE; x++) h += tileHtml(x, y);
+      els.kuniMap.innerHTML = h;
+    }
+    markSel();
+    updateTax();
+  }
+
+  /** 選んでいるマスの枠。地図を描き直さずに、class だけ付け替える。 */
+  function markSel() {
+    const old = els.kuniMap.querySelector('.tile.sel');
+    if (old) old.classList.remove('sel');
+    if (!sel) return;
+    const el = els.kuniMap.querySelector('.tile[data-x="' + sel.x + '"][data-y="' + sel.y + '"]');
+    if (el) el.classList.add('sel');
+  }
+
+  /** たまっているぜいきんの表示だけを更新する (1秒ごと)。 */
+  function updateTax() {
+    const pend = K.pending(S, now());
+    const cap = K.capacity(S);
+    const whole = Math.floor(pend);
+    const full = cap > 0 && pend >= cap - 0.01;
+    if (els.taxNow.textContent !== String(whole)) els.taxNow.textContent = String(whole);
+    els.taxCap.textContent = '/ ' + Math.floor(cap);
+    els.taxFill.style.width = Math.min(100, cap > 0 ? pend / cap * 100 : 0).toFixed(1) + '%';
+    els.taxGo.textContent = full ? 'いっぱい!' : 'うけとる';
+    els.taxBtn.setAttribute('aria-disabled', whole >= 1 ? 'false' : 'true');
+  }
+
+  function onTax() {
+    const r = K.collect(S, now());
+    if (r.amount < 1) { toast('まだ たまっていないよ\nちょっと まってね'); return; }
+    commit(r.state);
+    const b = els.taxBtn.getBoundingClientRect();
+    floatText('+' + r.amount, b.left + b.width / 2 - 24, b.top, 'gold');
+    burst(b.left + 60, b.top + 28, 'R', 0.6);
+    bump(els.pillCoin);
+  }
+
+  // --- 下から出る札 (土地・住民・役所)。マスの位置によって上か下に出し、選んだマスを隠さない
+  function openSheet(x, y) {
+    sel = { x: x, y: y };
+    renderKuni();
+    refreshSheet();
+  }
+  function closeSheet() {
+    sel = null;
+    els.sheet.hidden = true;
+    renderKuni();
+  }
+
+  function refreshSheet() {
+    if (!sel) { els.sheet.hidden = true; return; }
+    const x = sel.x, y = sel.y;
+    const st = K.statusOf(S, x, y);
+    const type = K.typeAt(x, y);
+    els.sheet.dataset.pos = y >= 4 ? 'top' : 'bottom';
+    let h = '';
+    const head = function (title, sub) {
+      return '<div class="sheet-top"><div><h3>' + title + '</h3><small>' + sub + '</small></div><button type="button" class="sheet-x" data-act="close" aria-label="とじる">✕</button></div>';
+    };
+    if (st === 'buy') {
+      const c = K.canBuy(S, x, y);
+      const gain = K.BASE_RATE * K.TYPES[type].mult * K.levelOf(S).mult;
+      h = head(LAND_NAME[type] + 'の とち', 'となりに つづく あたらしい とち') +
+        '<div class="sheet-body">かうと、ぜいきんが 1じかんで <b>+' + fmt(gain) + '</b> ふえるよ。' +
+        (K.TYPES[type].mult > 1 ? '<br>' + LAND_NAME[type] + 'は ふえやすい とち!' : '') + '</div>' +
+        '<div class="sheet-row"><button type="button" class="gbtn gray" data-act="close"><span class="gbtn-main">やめる</span></button>' +
+        '<button type="button" class="gbtn one" data-act="buy" aria-disabled="' + (c.ok ? 'false' : 'true') + '"><span class="gbtn-main">かう</span><span class="gbtn-sub"><span class="coin"></span>' + c.price + '</span></button></div>';
+    } else if (st === 'owned' && type === 'yakusho') {
+      const lv = K.levelOf(S);
+      const info = K.upgradeInfo(S);
+      h = head('ざっそうやくしょ', lv.title + ' / Lv.' + S.kuni.lv);
+      h += '<div class="sheet-body">ぜいきんを ためて、くにを おおきく するところ。<br>ためておけるのは <b>' + lv.hours + 'じかん</b>、しゅうにゅうは <b>x' + lv.mult + '</b></div>';
+      if (info.max) {
+        h += '<div class="empty-note">やくしょは いちばん おおきくなったよ!</div>';
+      } else {
+        const n = info.next;
+        const lack = function (what) { return info.lacks.some(function (l) { return l.what === what; }); };
+        h += '<div class="sheet-body" style="margin-top:6px">Lv.' + n.lv + ' <b>' + n.title + '</b> に するには:</div><ul class="need">' +
+          '<li class="' + (lack('tiles') ? '' : 'ok') + '">とちが ' + n.need.tiles + 'こ いじょう (いま ' + K.tileCount(S) + ')</li>' +
+          (n.need.people ? '<li class="' + (lack('people') ? '' : 'ok') + '">すみびとが ' + n.need.people + 'にん いじょう (いま ' + K.peopleCount(S) + ')</li>' : '') +
+          '<li class="' + (lack('coins') ? '' : 'ok') + '">コイン ' + n.cost + '</li></ul>' +
+          '<div class="sheet-row"><button type="button" class="gbtn ten" data-act="upgrade" aria-disabled="' + (info.ok ? 'false' : 'true') + '"><span class="gbtn-main">レベルアップ</span>' +
+          '<span class="gbtn-sub"><span class="coin"></span>' + n.cost + '</span></button></div>';
+      }
+    } else if (st === 'owned') {
+      const t = S.kuni.tiles[K.key(x, y)];
+      const base = K.TYPES[type].mult;
+      h = head(LAND_NAME[type], 'ぜいきん 1じかんで +' + fmt(K.tileRate(S, x, y) * K.levelOf(S).mult) + ' (' + (base > 1 ? 'ふえやすい とち' : 'ふつうの とち') + ')');
+      if (t.res) {
+        const card = C.cardById(t.res);
+        h += '<div class="sheet-body res-now"><div class="thumb">' + thumbSvg(t.res) + '</div><div class="meta"><b>' + shortName(card) + '</b>' +
+          '<small>ぜいきん ' + pct(K.residentBonus(S, t.res)) + '</small></div>' +
+          '<button type="button" class="gbtn gray" data-act="home"><span class="gbtn-main">かえす</span></button></div>';
+      } else {
+        h += '<div class="sheet-body">ざっそうくんを すませると、ぜいきんが ふえるよ。</div>';
+      }
+      const picks = C.CARDS.filter(function (c) { return K.freeCopies(S, c.id) > 0; })
+        .sort(function (a, b) { return K.residentBonus(S, b.id) - K.residentBonus(S, a.id); });
+      if (picks.length) {
+        h += '<div class="picks">' + picks.map(function (c) {
+          const free = K.freeCopies(S, c.id);
+          return '<button type="button" class="pick" data-act="pick" data-id="' + c.id + '"><div class="thumb">' + thumbSvg(c.id) + '</div>' +
+            '<span class="nm">' + shortName(c) + '</span><span class="up">' + pct(K.residentBonus(S, c.id)) + '</span>' + (free > 1 ? '<span class="n">あと ' + free + 'まい</span>' : '') + '</button>';
+        }).join('') + '</div>';
+      } else if (!t.res) {
+        h += '<div class="empty-note">すませる ざっそうくんが いないよ。<br>ガチャで あつめよう!</div>';
+      }
+    }
+    els.sheet.innerHTML = h;
+    els.sheet.hidden = false;
+  }
+
+  function onSheetClick(e) {
+    const el = e.target.closest('[data-act]');
+    if (!el || !sel) return;
+    const act = el.dataset.act;
+    if (act === 'close') { closeSheet(); return; }
+    if (el.getAttribute('aria-disabled') === 'true') {
+      if (act === 'buy') toast('コインが たりないよ!\nホームで なでて ためよう');
+      if (act === 'upgrade') toast('まだ じょうけんが そろってないよ');
+      return;
+    }
+    if (act === 'buy') {
+      const r = K.buy(S, sel.x, sel.y, now());
+      if (r.ok) {
+        const tx = sel.x, ty = sel.y;
+        commit(r.state);
+        sel = null;
+        els.sheet.hidden = true;
+        renderKuni();
+        const tile = els.kuniMap.querySelector('.tile[data-x="' + tx + '"][data-y="' + ty + '"]');
+        if (tile) {
+          tile.animate([{ transform: 'scale(.6)' }, { transform: 'scale(1.18)', offset: 0.6 }, { transform: 'scale(1)' }], { duration: 420, easing: 'ease-out' });
+          const b = tile.getBoundingClientRect();
+          burst(b.left + 27, b.top + 27, 'N', 0.5);
+        }
+        toast('あたらしい とちを てにいれた!');
+      } else {
+        toast('かえなかったよ');
+      }
+    } else if (act === 'pick' || act === 'home') {
+      const r = K.assign(S, sel.x, sel.y, act === 'pick' ? el.dataset.id : null, now());
+      if (r.ok) commit(r.state);
+    } else if (act === 'upgrade') {
+      const r = K.upgrade(S, now());
+      if (r.ok) {
+        commit(r.state);
+        burst(215, 300, 'SR', 1);
+        toast(K.levelOf(S).title + ' に なったよ!\nもっと ひろい とちが かえるよ');
+      }
+    }
+  }
+
+  function onMapClick(e) {
+    const tile = e.target.closest('.tile');
+    if (!tile) return;
+    const x = Number(tile.dataset.x), y = Number(tile.dataset.y);
+    const st = tile.dataset.s;
+    if (st === 'level') { toast('やくしょの レベルを あげると\nここまで ひろげられるよ'); return; }
+    if (st === 'far') { toast('となりの とちを かってから!'); return; }
+    openSheet(x, y);
   }
 
   // ---------------------------------------------------------------- ガチャの画面
@@ -638,6 +857,8 @@
     Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (t) { t.classList.toggle('on', t.dataset.screen === screenId); });
     if (screenId === 'albumScreen') { buildFilters(); albumDirty = true; renderAlbum(); }
     if (screenId === 'gachaScreen') renderGacha();
+    if (screenId === 'kuniScreen') { renderKuni(); refreshSheet(); }
+    if (screenId !== 'kuniScreen' && sel) { sel = null; els.sheet.hidden = true; kuniSig = ''; }
   }
 
   // ---------------------------------------------------------------- 起動
@@ -647,13 +868,19 @@
     makeSpecks();
     buildFilters();
     renderHome();
+    if (!S.kuni.tick) S = K.settle(S, now());     // 国のぜいきんは、はじめて開いたときから数える
     commit(S);                    // 画面を今の状態に合わせる
-    S = C.clone(S);
 
     els.zassou.addEventListener('pointerdown', onPet);
     document.querySelectorAll('.tab').forEach(function (t) {
       t.addEventListener('click', function () { show(t.dataset.screen); });
     });
+    els.kuniMap.addEventListener('click', onMapClick);
+    els.sheet.addEventListener('click', onSheetClick);
+    els.taxBtn.addEventListener('click', onTax);
+    // 国のぜいきんは時間でたまる。見ている間は 1秒ごとに表示を進め、赤い点は 20秒ごとに見直す
+    setInterval(function () { if (!document.hidden && currentScreen === 'kuniScreen') updateTax(); }, 1000);
+    setInterval(function () { if (!document.hidden) renderHud(); }, 20000);
     els.freeBanner.addEventListener('click', function () { show('gachaScreen'); });
     els.btnFree.addEventListener('click', function () { startDraw('free'); });
     els.btnOne.addEventListener('click', function () { startDraw('one'); });
@@ -695,6 +922,7 @@
       state: function () { return S; },
       setState: function (s) { commit(s, true); },
       setRng: function (f) { rngOverride = f; },
+      setNow: function (ms) { nowOverride = ms; renderHud(); if (currentScreen === 'kuniScreen') renderKuni(); },
       setToday: function (d) { todayOverride = d; renderHud(); renderGacha(); },
       draw: startDraw,
       show: show,

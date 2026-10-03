@@ -424,8 +424,58 @@
     return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 210" preserveAspectRatio="xMidYMax slice">' + bg(uid) + '</svg>';
   }
 
+  // ---------------------------------------------------------------- 国の地図のマス (viewBox 60 x 60)
+  const LAND_COLOR = { nohara: '#b8e08a', oka: '#a5d36d', mori: '#8ccb78', mizu: '#86d0ee', hana: '#c6e68e', yakusho: '#f1e3b8' };
+
+  /** 地図の 1マス。type は kuni.js の土地の種類。x, y で飾りの位置が少し変わる。 */
+  function tile(type, x, y) {
+    const rnd = seeded(type + ':' + x + ',' + y);
+    const px = function (lo, hi) { return r1(lo + rnd() * (hi - lo)); };
+    let s = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60" class="land"><rect width="60" height="60" fill="' + (LAND_COLOR[type] || LAND_COLOR.nohara) + '"/>';
+    const tuft = function (cx, cy, col) {
+      return '<path d="M' + cx + ' ' + cy + ' l-2.4 -6 M' + cx + ' ' + cy + ' l0 -7.4 M' + cx + ' ' + cy + ' l2.4 -6" stroke="' + col + '" stroke-width="1.8" stroke-linecap="round" fill="none"/>';
+    };
+    let i;
+    if (type === 'nohara') {
+      for (i = 0; i < 5; i++) s += tuft(px(8, 52), px(18, 54), '#6fae4a');
+    } else if (type === 'oka') {
+      s += '<ellipse cx="30" cy="58" rx="40" ry="26" fill="#bfe58b"/><ellipse cx="22" cy="54" rx="16" ry="8" fill="#d2f0a3" opacity=".8"/>';
+      for (i = 0; i < 3; i++) s += tuft(px(10, 50), px(24, 40), '#6fae4a');
+    } else if (type === 'mori') {
+      for (i = 0; i < 3; i++) {
+        const cx = 12 + i * 18 + px(-3, 3), cy = px(26, 34), sc = px(0.85, 1.1);
+        s += '<g transform="translate(' + cx + ' ' + cy + ') scale(' + sc + ')"><rect x="-2" y="6" width="4" height="12" fill="#8a5a34"/>' +
+          '<circle cx="0" cy="2" r="11" fill="#4f9e4f"/><circle cx="-3" cy="-1" r="7" fill="#6fbf63"/><circle cx="-5" cy="-3" r="2.4" fill="#a4e08c"/></g>';
+      }
+    } else if (type === 'mizu') {
+      s += '<ellipse cx="30" cy="32" rx="26" ry="20" fill="#5fbde6"/>';
+      for (i = 0; i < 3; i++) {
+        const cx = px(16, 44), cy = px(24, 42);
+        s += '<path d="M' + (cx - 7) + ' ' + cy + ' q3.5 -4 7 0 t7 0" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" opacity=".85"/>';
+      }
+      s += '<ellipse cx="40" cy="22" rx="6" ry="3.6" fill="#7bc96a" stroke="#4f9e4f" stroke-width="1"/><circle cx="41" cy="21" r="2" fill="#ffb3c8"/>';
+    } else if (type === 'hana') {
+      const cols = ['#ff9fb8', '#ffe27a', '#ffffff', '#c9a2ff'];
+      for (i = 0; i < 8; i++) {
+        const cx = px(8, 52), cy = px(10, 52), col = cols[i % cols.length];
+        s += '<circle cx="' + cx + '" cy="' + cy + '" r="3.8" fill="' + col + '" stroke="#e9c3cf" stroke-width=".8"/><circle cx="' + cx + '" cy="' + cy + '" r="1.5" fill="#ffd54f"/>';
+      }
+    } else if (type === 'yakusho') {
+      s += '<rect y="46" width="60" height="14" fill="#e4d2a0"/>';
+      for (i = 0; i < 6; i++) s += '<circle cx="' + (6 + i * 10) + '" cy="' + (52 + (i % 2) * 4) + '" r="2" fill="#cdb97f"/>';
+      // 旗: ざっそうの葉
+      s += '<path d="M30 14 V4" stroke="#7a5434" stroke-width="2" stroke-linecap="round"/>' +
+        '<path d="M30 4 l9 2.6 -2 2.4 3 2.4 -3 .4 -1 3 -4 -2.6 -2 2.6Z" fill="#9fc15c" stroke="#5f8a2c" stroke-width="1.2" stroke-linejoin="round"/>';
+      s += '<path d="M9 28 L30 11 L51 28Z" fill="#e8786e" stroke="#9a4338" stroke-width="2.4" stroke-linejoin="round"/>' +
+        '<rect x="14" y="28" width="32" height="20" fill="#fff6dc" stroke="#9a7a4a" stroke-width="2.4"/>' +
+        '<rect x="26" y="34" width="9" height="14" rx="4" fill="#8a5a34" stroke="#5c3a1e" stroke-width="1.6"/>' +
+        '<circle cx="19.5" cy="35" r="2.6" fill="#9fd4f0" stroke="#5f93b0" stroke-width="1.2"/><circle cx="40.5" cy="35" r="2.6" fill="#9fd4f0" stroke="#5f93b0" stroke-width="1.2"/>';
+    }
+    return s + '</svg>';
+  }
+
   return {
-    zassou: zassou, scene: scene, background: background,
+    tile: tile, zassou: zassou, scene: scene, background: background,
     BG_NAMES: Object.keys(BG), ACC_NAMES: Object.keys(ACC), TONE_NAMES: Object.keys(TONES),
     EXPRS: ['smile', 'open', 'sleepy', 'happy', 'surprise', 'smirk']
   };

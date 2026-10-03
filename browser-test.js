@@ -137,7 +137,7 @@ async function run() {
       ok(fit.wide <= 0 && fit.high <= 0, `はみ出して動く所がない (横 ${fit.wide} / 縦 ${fit.high})`);
 
       // どのボタンも、画面の中に見えていて、上に別のものが重なっていない
-      const screens = [['homeScreen', '#zassou', '#petBox', '#freeBanner'], ['gachaScreen', '#btnOne', '#btnTen', '#btnRates'], ['albumScreen', '.chip', '.slot']];
+      const screens = [['homeScreen', '#zassou', '#petBox', '#freeBanner'], ['kuniScreen', '#taxBtn', '.tile[data-s="owned"]', '.tile[data-s="buy"]'], ['gachaScreen', '#btnOne', '#btnTen', '#btnRates'], ['albumScreen', '.chip', '.slot']];
       for (const [id, ...sels] of screens) {
         await page.evaluate((s) => window.__app.show(s), id);
         await page.waitForTimeout(80);
@@ -543,6 +543,179 @@ async function run() {
       await bad.context.close();
     }
 
+
+    // ================================================== くに
+    section('くに: 土地・住民・ぜいきん・役所');
+    {
+      const { page, context, errors: errs } = await openPage(browser);
+      const base = await page.evaluate(() => Date.now());
+      await page.evaluate((b) => window.__app.setNow(b), base);
+      await patch(page, 's.kuni.tick = arg', base);
+      await page.locator('#tabKuni').tap();
+      await page.waitForTimeout(150);
+
+      const count = () => page.evaluate(() => {
+        const c = {}; document.querySelectorAll('#kuniMap .tile').forEach((t) => { c[t.dataset.s] = (c[t.dataset.s] || 0) + 1; });
+        return { c, n: document.querySelectorAll('#kuniMap .tile').length };
+      });
+      let r = await count();
+      ok(r.n === 49, `地図は 7 x 7 = 49マス (${r.n})`);
+      ok(r.c.owned === 5 && r.c.buy === 4, `はじめは 土地 5・買える所 4 (${JSON.stringify(r.c)})`);
+      ok(await page.evaluate(() => document.getElementById('kuniName').textContent) === 'ざっそうむら', 'はじめは「ざっそうむら」');
+
+      // 画面に収まる (安全域つき) / 指で押せる大きさ
+      const geo = await page.evaluate(() => {
+        const m = document.getElementById('kuniMap').getBoundingClientRect();
+        const bar = document.getElementById('tabbar').getBoundingClientRect();
+        const t = document.querySelector('#kuniMap .tile').getBoundingClientRect();
+        const rate = document.getElementById('kuniRate').getBoundingClientRect();
+        return { right: m.right, left: m.left, bottom: m.bottom, tabTop: bar.top, tile: Math.min(t.width, t.height), rateBottom: rate.bottom };
+      });
+      ok(geo.left >= 0 && geo.right <= 430 && geo.rateBottom <= geo.tabTop, `地図と説明がタブの上に収まる (説明の下 ${Math.round(geo.rateBottom)} <= ${Math.round(geo.tabTop)})`);
+      ok(geo.tile >= 44, `マスは 指で押せる大きさ 44pt 以上 (${geo.tile})`);
+
+      // 範囲の外・つながっていない所は、買えない。理由を言う
+      await page.locator('.tile[data-x="0"][data-y="0"]').tap();
+      ok(await page.evaluate(() => document.getElementById('sheet').hidden && /レベル/.test(document.getElementById('toast').textContent)), 'ひらけない所は札が出ず、レベルのことを教えてくれる');
+
+      // 土地を買う: 90 コイン → 60 コインの土地
+      await page.locator('.tile[data-x="2"][data-y="2"]').tap();
+      const sheet1 = await page.evaluate(() => ({ shown: !document.getElementById('sheet').hidden, text: document.getElementById('sheet').textContent, pos: document.getElementById('sheet').dataset.pos }));
+      ok(sheet1.shown && /60/.test(sheet1.text) && /かう/.test(sheet1.text), `買える土地を押すと 値段 60 が出る`);
+      // 選んだマスが札に隠れない
+      const ov = await page.evaluate(() => {
+        const a = document.getElementById('sheet').getBoundingClientRect();
+        const b = document.querySelector('.tile.sel').getBoundingClientRect();
+        return a.bottom <= b.top || b.bottom <= a.top;
+      });
+      ok(ov, '札が 選んだマスに かぶらない');
+      await page.locator('[data-act="buy"]').tap();
+      await page.waitForTimeout(150);
+      const after1 = await page.evaluate(() => ({ coins: window.__app.state().coins, tiles: Object.keys(window.__app.state().kuni.tiles).length, hidden: document.getElementById('sheet').hidden }));
+      ok(after1.coins === 30 && after1.tiles === 6, `買うと 90 → 30 コイン・土地 6 (${after1.coins}, ${after1.tiles})`);
+      ok(after1.hidden, '買ったあと札が閉じる');
+      r = await count();
+      ok(r.c.owned === 6, `地図が 6マスになる (${r.c.owned})`);
+
+      // コインが足りない
+      await page.locator('.tile[data-s="buy"]').first().tap();
+      await page.locator('[data-act="buy"]').tap({ force: true });
+      ok(await page.evaluate(() => window.__app.state().coins) === 30, 'コインが足りないと買えず、減らない');
+      ok(await page.evaluate(() => /たりない/.test(document.getElementById('toast').textContent)), '足りない理由を言う');
+      await page.locator('[data-act="close"]').first().tap();
+      ok(await page.evaluate(() => document.getElementById('sheet').hidden), '✕ で札が閉じる');
+
+      // マスを選んだだけでは 地図を作り直さない (48人ぶんの絵を毎回描くと遅い)
+      const same = await page.evaluate(() => {
+        const first = document.querySelector('#kuniMap .tile[data-s="owned"]');
+        window.__tileNode = first;
+        return !!first;
+      });
+      await page.locator('.tile[data-x="3"][data-y="4"]').tap();
+      await page.locator('.tile[data-x="3"][data-y="2"]').tap();
+      ok(same && await page.evaluate(() => document.querySelector('#kuniMap .tile[data-s="owned"]') === window.__tileNode), 'マスを選んでも 地図の部品は作り直されない');
+      await page.locator('[data-act="close"]').first().tap();
+
+      // 札が出る位置: 下のほうのマスは札が上に出て、隠れない
+      await patch(page, 's.coins = 5000; s.owned = { futsu: 1, ame: 2, ogon: 1 }; ');
+      for (const [x, y] of [[3, 4], [3, 3], [3, 2]]) {
+        await page.locator(`.tile[data-x="${x}"][data-y="${y}"]`).tap();
+        const o = await page.evaluate(() => {
+          const sh = document.getElementById('sheet');
+          const a = sh.getBoundingClientRect(), b = document.querySelector('.tile.sel').getBoundingClientRect();
+          return { pos: sh.dataset.pos, clear: a.bottom <= b.top || b.bottom <= a.top, inside: a.top >= 0 && a.bottom <= document.getElementById('tabbar').getBoundingClientRect().top + 1 };
+        });
+        ok(o.clear && o.inside, `(${x},${y}) 札は ${o.pos} に出て、マスに かぶらず 画面に収まる`);
+      }
+
+      // 住民を住まわせる
+      const before = await page.evaluate(() => ({ rate: Number(/\+([\d.]+)/.exec(document.getElementById('kuniRate').textContent)[1]) }));
+      await page.locator('.tile[data-x="2"][data-y="3"]').tap();      // はなばたけ
+      const picks = await page.evaluate(() => [...document.querySelectorAll('.pick')].map((e) => e.dataset.id));
+      ok(picks[0] === 'ogon' && picks.length === 3, `すませる候補は 増え方の大きい順 (${picks.join(',')})`);
+      await page.locator('.pick[data-id="ogon"]').tap();
+      await page.waitForTimeout(100);
+      const after2 = await page.evaluate(() => ({
+        rate: Number(/\+([\d.]+)/.exec(document.getElementById('kuniRate').textContent)[1]),
+        res: window.__app.state().kuni.tiles['2,3'].res, people: document.getElementById('kuniPeople').textContent,
+        sprite: !!document.querySelector('.tile[data-x="2"][data-y="3"] .res svg'), bonus: (document.querySelector('.tile[data-x="2"][data-y="3"] .bonus') || {}).textContent,
+        now: !!document.querySelector('#sheet .res-now')
+      }));
+      ok(after2.res === 'ogon' && after2.people === '1', `おうごんが 住んだ (${after2.res}, すみびと ${after2.people})`);
+      ok(after2.rate > before.rate + 2.5, `ぜいきんが 増える (+${before.rate} → +${after2.rate})`);
+      ok(after2.sprite && /\+\d+%/.test(after2.bonus || ''), `マスに ざっそうくんと 増え方が出る (${after2.bonus})`);
+      ok(after2.now, '札にも 今住んでいる子が出る');
+
+      // かぶった 2まいは 2か所に住める。3か所目はできない
+      await page.locator('.pick[data-id="ame"]').tap();                // (2,3) の ogon が ame に入れ替わる
+      await page.locator('.tile[data-x="4"][data-y="3"]').tap();
+      await page.locator('.pick[data-id="ame"]').tap();
+      await page.locator('.tile[data-x="3"][data-y="2"]').tap();
+      const left = await page.evaluate(() => [...document.querySelectorAll('.pick')].map((e) => e.dataset.id));
+      ok(!left.includes('ame'), `ame は 2まい とも 住んだので もう選べない (${left.join(',')})`);
+      ok(left.includes('ogon'), '入れ替わった ogon は また選べる');
+      // 帰す
+      await page.locator('.tile[data-x="4"][data-y="3"]').tap();
+      await page.locator('[data-act="home"]').tap();
+      ok(await page.evaluate(() => window.__app.state().kuni.tiles['4,3'].res) === null, '「かえす」で 住民が もどる');
+      await page.locator('[data-act="close"]').first().tap();
+
+      // ぜいきん
+      await patch(page, 's.kuni.tick = arg; s.kuni.stored = 0; s.coins = 0', base);
+      await page.evaluate((b) => window.__app.setNow(b + 2 * 3600e3), base);
+      const tax = await page.evaluate(() => ({ now: Number(document.getElementById('taxNow').textContent), off: document.getElementById('taxBtn').getAttribute('aria-disabled'), rate: Number(/\+([\d.]+)/.exec(document.getElementById('kuniRate').textContent)[1]) }));
+      ok(Math.abs(tax.now - Math.floor(tax.rate * 2)) <= 1 && tax.off === 'false', `2時間でたまった分が出る (${tax.now} ≒ ${tax.rate} x 2)`);
+      await page.locator('#taxBtn').tap();
+      await page.waitForTimeout(150);
+      const got = await page.evaluate(() => ({ coins: window.__app.state().coins, now: document.getElementById('taxNow').textContent, off: document.getElementById('taxBtn').getAttribute('aria-disabled') }));
+      ok(got.coins === tax.now && got.now === '0' && got.off === 'true', `うけとると コイン +${got.coins}・たまりが 0 に (${got.now})`);
+      await page.locator('#taxBtn').tap({ force: true });
+      ok(await page.evaluate(() => /まだ/.test(document.getElementById('toast').textContent)) && await page.evaluate(() => window.__app.state().coins) === got.coins, '空のときに押しても 増えず、まってねと言う');
+
+      // 放っておいても 上限で止まる
+      await page.evaluate((b) => window.__app.setNow(b + 500 * 3600e3), base);
+      const full = await page.evaluate(() => ({ now: Number(document.getElementById('taxNow').textContent), cap: Number(/\/ (\d+)/.exec(document.getElementById('taxCap').textContent)[1]), go: document.getElementById('taxGo').textContent, dot: !document.getElementById('kuniDot').hidden }));
+      ok(full.now === full.cap && full.go === 'いっぱい!', `500時間たっても 上限 ${full.cap} で止まる (${full.now}, ${full.go})`);
+      ok(full.dot, 'たまると「くに」のタブに赤い点');
+      await page.locator('#taxBtn').tap();
+      await page.waitForTimeout(100);
+      ok(await page.evaluate(() => document.getElementById('kuniDot').hidden), '受け取ると赤い点が消える');
+
+      // 役所のレベルアップ
+      await patch(page, `s.coins = 10000; for (const k of ['2,2','4,2','2,4','4,4']) s.kuni.tiles[k] = { res: null };`);
+      await page.locator('.tile[data-x="3"][data-y="3"]').tap();
+      ok(await page.evaluate(() => /ざっそうやくしょ/.test(document.getElementById('sheet').textContent) && document.querySelectorAll('.need li.ok').length === 2), '役所を押すと、じょうけんが出る (土地 ✓・コイン ✓)');
+      ok(await page.evaluate(() => document.querySelector('[data-act="upgrade"]').getAttribute('aria-disabled')) === 'false', 'そろうとレベルアップできる');
+      const buyable0 = (await count()).c.buy || 0;
+      await page.locator('[data-act="upgrade"]').tap();
+      await page.waitForTimeout(150);
+      const up = await page.evaluate(() => ({ lv: window.__app.state().kuni.lv, name: document.getElementById('kuniName').textContent, coins: window.__app.state().coins }));
+      ok(up.lv === 2 && up.name === 'ざっそうまち' && up.coins === 9600, `Lv.2「${up.name}」・コイン 10000 → ${up.coins}`);
+      r = await count();
+      ok((r.c.buy || 0) > buyable0, `ひろげられる所が 増える (${buyable0} → ${r.c.buy})`);
+
+      // 別のタブへ行くと札が閉じる
+      await page.locator('#tabAlbum').tap();
+      await page.locator('#tabKuni').tap();
+      ok(await page.evaluate(() => document.getElementById('sheet').hidden), '別のタブから戻ると 札は閉じている');
+
+      // 画面を閉じていた間のぜいきん (保存 → 開きなおし)
+      const past = await page.evaluate(() => Date.now() - 3 * 3600e3);
+      await patch(page, 's.kuni.tick = arg; s.kuni.stored = 0', past);
+      await page.evaluate(() => window.__app.saveNow());
+      await page.reload();
+      await page.waitForFunction(() => window.__app);
+      await page.locator('#tabKuni').tap();
+      const off = await page.evaluate(() => Number(document.getElementById('taxNow').textContent));
+      ok(off >= 3, `3時間 閉じていた間も たまっている (${off})`);
+      ok(await page.evaluate(() => window.__app.state().kuni.lv) === 2 && await page.evaluate(() => Object.keys(window.__app.state().kuni.tiles).length) === 9, '開きなおしても 土地とレベルが残る');
+
+      const dup = await page.evaluate(() => { const ids = [...document.querySelectorAll('[id]')].map((e) => e.id); return ids.filter((x, i) => ids.indexOf(x) !== i); });
+      ok(dup.length === 0, `地図を出しても id が重ならない (${dup.slice(0, 3).join(',') || '重なり 0'})`);
+      ok(errs.length === 0, 'JS エラーなし' + (errs.length ? ': ' + errs.join(' / ') : ''));
+      await context.close();
+    }
+
     // ================================================== 重さ
     section('遅い端末 (CPU 4倍遅い) での動き');
     {
@@ -594,6 +767,22 @@ async function run() {
       const sf = await scrollFps;
       console.log(`  [測定] アルバムをスクロール: ${sf} fps`);
       ok(sf >= 30, `アルバム (24まい) をスクロールして 30fps 以上 (${sf})`);
+
+      // くに: 全マスに住民がいる、いちばん重い地図 (1秒ごとの表示の更新つき)
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+      await patch(page, `s.kuni.lv = 5; s.owned = Object.fromEntries(window.Core.CARDS.map((c) => [c.id, 3]));
+        const ids = window.Core.CARDS.map((c) => c.id); let i = 0;
+        for (let y = 0; y < 7; y++) for (let x = 0; x < 7; x++) s.kuni.tiles[x + ',' + y] = { res: (x === 3 && y === 3) ? null : ids[i++ % ids.length] };`);
+      await page.locator('#tabKuni').tap();
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+      await page.waitForTimeout(600);
+      const kidle = await measure(1500);
+      console.log(`  [測定] くに (48人 すべて住んでいる): ${kidle} fps`);
+      ok(kidle >= 40, `全マス住民の地図で じっとしているとき 40fps 以上 (${kidle})`);
+      const t0 = Date.now();
+      await page.locator('.tile[data-x="2"][data-y="3"]').tap();
+      await page.waitForSelector('#sheet:not([hidden])');
+      console.log(`  [測定] 札を開くまで: ${Date.now() - t0} ms (CPU 4倍遅)`);
       await context.close();
     }
 

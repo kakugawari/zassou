@@ -112,7 +112,7 @@
   }
 
   function clone(state) {
-    return {
+    const copy = {
       v: state.v, coins: state.coins,
       owned: Object.assign({}, state.owned),
       seen: Object.assign({}, state.seen),
@@ -120,6 +120,9 @@
       tapCharge: state.tapCharge, home: state.home,
       claimed: state.claimed.slice()
     };
+    // 国づくり (kuni.js) の状態。無い保存には鍵を作らない
+    if (state.kuni) copy.kuni = JSON.parse(JSON.stringify(state.kuni));
+    return copy;
   }
 
   function ownedCount(state) {
@@ -295,6 +298,8 @@
     }
     if (typeof raw.home === 'string' && base.owned[raw.home] > 0) base.home = raw.home;
     else if (!(base.owned[base.home] > 0)) base.home = 'futsu';
+    // 国づくりの状態は中身を確かめずに預かる (Kuni.normalize が整える)
+    if (raw.kuni && typeof raw.kuni === 'object') base.kuni = raw.kuni;
     return base;
   }
 
