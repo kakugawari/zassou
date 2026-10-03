@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ざっそうくんのガチャ</title>
+<meta name="description" content="ざっそうくんをなでて、ガチャをまわして、トレカをあつめよう">
+<meta name="theme-color" content="#fff3d6">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ざっそう">
+<link rel="icon" href="./icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="./icon-180.png">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+
+<div id="app">
+  <header id="topbar">
+    <h1 class="logo">ざっそう<span>くん</span></h1>
+    <div class="pills">
+      <div class="pill" id="pillOwned" aria-label="あつめたカード"><span class="ico-card"></span><b id="ownedCount">0</b><small id="ownedTotal">/24</small></div>
+      <div class="pill" id="pillCoin" aria-label="コイン"><span class="coin"></span><b id="coinCount">0</b></div>
+    </div>
+  </header>
+
+  <main id="screens">
+    <!-- ホーム: ざっそうくんをなでる -->
+    <section id="homeScreen" class="screen on" aria-label="ホーム">
+      <div id="homeBg"></div>
+      <div id="clouds" aria-hidden="true"><i></i><i></i></div>
+      <div id="air" aria-hidden="true"></div>
+      <button type="button" id="freeBanner" class="banner" hidden>
+        <span class="banner-gift">🎁</span>
+        <span class="banner-text">きょうの むりょうガチャが できるよ!</span>
+      </button>
+      <div id="bubble" class="bubble" hidden></div>
+      <div id="homeZ">
+        <div id="homeShadow"></div>
+        <button type="button" id="zassou" aria-label="ざっそうくんをなでる"><div id="zassouArt"></div></button>
+      </div>
+      <div id="petBox">
+        <p class="pet-hint">ざっそうくんを なでて コインを ためよう</p>
+        <div id="gauge" aria-label="なでたかいすう"></div>
+      </div>
+    </section>
+
+    <!-- ガチャ -->
+    <section id="gachaScreen" class="screen" aria-label="ガチャ">
+      <div id="gachaBg"></div>
+      <div class="machine-wrap">
+        <div id="machine"></div>
+      </div>
+      <p id="pityText" class="pity"></p>
+      <div id="gachaButtons">
+        <button type="button" id="btnFree" class="gbtn free"><span class="gbtn-main">きょうの むりょう</span><span class="gbtn-sub">1日1かい</span></button>
+        <div class="gbtn-row">
+          <button type="button" id="btnOne" class="gbtn one"><span class="gbtn-main">1かい</span><span class="gbtn-sub"><span class="coin"></span>30</span></button>
+          <button type="button" id="btnTen" class="gbtn ten"><span class="gbtn-main">10かい</span><span class="gbtn-sub"><span class="coin"></span>270<em>おとく!</em></span></button>
+        </div>
+        <button type="button" id="btnRates" class="link">ていしゅつわりあい</button>
+      </div>
+    </section>
+
+    <!-- アルバム -->
+    <section id="albumScreen" class="screen" aria-label="アルバム">
+      <div class="album-head">
+        <div class="album-progress"><b id="albumHave">0</b><span> / </span><span id="albumAll">24</span><small> まい あつまったよ</small></div>
+        <div class="bar"><i id="albumBar"></i></div>
+        <div id="filters" role="tablist"></div>
+      </div>
+      <div id="albumGrid"></div>
+    </section>
+  </main>
+
+  <nav id="tabbar">
+    <button type="button" class="tab on" id="tabHome" data-screen="homeScreen">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 15 L16 5 L27 15 V27 H5Z" fill="currentColor" opacity=".25"/><path d="M5 15 L16 5 L27 15 M8 13 V27 H24 V13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M13 27 V19 H19 V27" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"/></svg>
+      <span>ホーム</span>
+    </button>
+    <button type="button" class="tab" id="tabGacha" data-screen="gachaScreen">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="11" fill="currentColor" opacity=".25"/><circle cx="16" cy="16" r="11" fill="none" stroke="currentColor" stroke-width="2.6"/><path d="M5 16 H27" stroke="currentColor" stroke-width="2.6"/><circle cx="16" cy="16" r="3.4" fill="#fff" stroke="currentColor" stroke-width="2.4"/></svg>
+      <span>ガチャ</span><i class="dot" id="gachaDot" hidden></i>
+    </button>
+    <button type="button" class="tab" id="tabAlbum" data-screen="albumScreen">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="6" y="5" width="15" height="21" rx="2.5" fill="currentColor" opacity=".25" transform="rotate(-8 13 15)"/><rect x="6" y="5" width="15" height="21" rx="2.5" fill="none" stroke="currentColor" stroke-width="2.6" transform="rotate(-8 13 15)"/><rect x="12" y="7" width="15" height="21" rx="2.5" fill="#fff" stroke="currentColor" stroke-width="2.6" transform="rotate(8 19 17)"/><path d="M19.5 14 l1.6 3.4 3.7.4 -2.8 2.5 .8 3.7 -3.3 -1.9 -3.3 1.9 .8 -3.7 -2.8 -2.5 3.7 -.4Z" fill="currentColor" transform="translate(1 -1) scale(.82) translate(3.5 3)"/></svg>
+      <span>アルバム</span><i class="dot" id="albumDot" hidden></i>
+    </button>
+  </nav>
+</div>
+
+<!-- ガチャの演出 -->
+<div id="reveal" hidden>
+  <div id="revealCount"></div>
+  <button type="button" id="revealSkip" class="skip" hidden>ぜんぶ みる</button>
+  <div id="revealStage"></div>
+  <div id="revealHint" class="hint"></div>
+  <div id="revealActions" hidden>
+    <button type="button" id="revealNext" class="gbtn next"><span class="gbtn-main">つぎへ</span></button>
+  </div>
+  <div id="revealSummary" hidden>
+    <h2>ゲットしたよ!</h2>
+    <div id="summaryGrid"></div>
+    <div id="summaryExtra"></div>
+    <button type="button" id="revealClose" class="gbtn next"><span class="gbtn-main">とじる</span></button>
+  </div>
+</div>
+
+<!-- カードを大きく見る -->
+<div id="zoom" hidden>
+  <div id="zoomBack"></div>
+  <div id="zoomCard"></div>
+  <div id="zoomButtons">
+    <button type="button" id="btnHome" class="gbtn one"><span class="gbtn-main">ホームに かざる</span></button>
+    <button type="button" id="zoomClose" class="gbtn next"><span class="gbtn-main">とじる</span></button>
+  </div>
+</div>
+
+<!-- ていしゅつわりあい -->
+<div id="rates" hidden>
+  <div class="sheet">
+    <h2>ていしゅつわりあい</h2>
+    <div id="ratesBody"></div>
+    <p class="fine">コインは ゲームの なかだけの ものだよ。おかねは つかわないよ。<br>
+      <span id="ratesPity"></span></p>
+    <button type="button" id="ratesClose" class="gbtn next"><span class="gbtn-main">とじる</span></button>
+  </div>
+</div>
+
+<div id="toast" role="status" hidden></div>
+
+<script src="./core.js"></script>
+<script src="./looks.js"></script>
+<script src="./art.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>
