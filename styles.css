@@ -283,6 +283,9 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 .tile .ground svg { display: block; width: 100%; height: 100%; }
 .tile .res { position: absolute; left: 50%; bottom: 3px; width: 44px; height: 44px; margin-left: -22px; pointer-events: none; }
 .tile .res svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.tile .face { position: absolute; right: -3px; top: -4px; width: 20px; height: 20px; pointer-events: none; filter: drop-shadow(0 1px 0 rgba(0,0,0,.2)); }
+.tile .face svg { display: block; width: 100%; height: 100%; }
+.tile .kz { position: absolute; left: 3px; bottom: 2px; font-size: 8px; line-height: 1; letter-spacing: 1px; color: #8a5a34; text-shadow: 0 1px 0 #fff; pointer-events: none; }
 .tile .bonus {
   position: absolute; right: -2px; top: -4px; padding: 0 4px; border-radius: 8px;
   background: #ff8fa3; color: #fff; border: 1.5px solid #fff; font-size: 9px; font-weight: 900; line-height: 14px; pointer-events: none;
@@ -309,21 +312,23 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
   position: absolute; z-index: 6; left: 10px; right: 10px;
   padding: 12px 14px 14px; border-radius: 24px; background: var(--paper);
   border: 4px solid #e8d3a0; box-shadow: 0 6px 0 rgba(120, 90, 40, .25), 0 10px 24px rgba(60, 40, 10, .25);
+  max-height: 340px; overflow-y: auto; -webkit-overflow-scrolling: touch;
 }
 #sheet[data-pos="bottom"] { bottom: 8px; }
 #sheet[data-pos="top"] { top: 8px; }
 .sheet-top { display: flex; align-items: center; gap: 10px; }
-.sheet-top h3 { margin: 0; font-size: 18px; font-weight: 900; }
+.sheet-top h3 { margin: 0; font-size: 18px; font-weight: 900; line-height: 1.2; }
 .sheet-top small { display: block; font-size: 12px; color: var(--ink-soft); font-weight: 700; }
 .sheet-x { margin-left: auto; width: 36px; height: 36px; border-radius: 50%; background: #f1e6c8; font-size: 18px; font-weight: 900; color: var(--ink-soft); flex: none; }
 .sheet-body { margin-top: 8px; font-size: 14px; font-weight: 700; line-height: 1.5; }
 .sheet-row { display: flex; gap: 10px; margin-top: 10px; }
-.sheet-row .gbtn { flex: 1; min-height: 50px; }
+.sheet-row .gbtn { flex: 1; min-height: 46px; }
 .sheet-row .gbtn-main { font-size: 18px; }
 .sheet-row .gbtn-sub { font-size: 14px; }
 .gbtn.gray { background: linear-gradient(#e6dcc4, #cfc3a2); box-shadow: 0 5px 0 #a79a78; color: var(--ink); text-shadow: none; }
+.need-title { margin-top: 6px; font-size: 13px; font-weight: 700; }
 .need { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 3px; }
-.need li { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.need li { display: flex; align-items: center; gap: 6px; font-size: 12px; }
 .need li::before { content: "✕"; width: 20px; height: 20px; border-radius: 50%; background: #f1c6cf; color: #c9486c; text-align: center; font-size: 12px; line-height: 20px; flex: none; }
 .need li.ok::before { content: "✓"; background: #cfe9a8; color: #4f8a22; }
 .res-now { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 14px; background: #fff6dc; border: 2px dashed #e1cc98; }
@@ -341,6 +346,41 @@ button { font: inherit; color: inherit; border: 0; background: none; padding: 0;
 .pick .nm { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pick .up { color: #d6457a; font-size: 12px; }
 .pick .n { color: var(--ink-soft); font-weight: 700; }
+.upset { color: #c9486c; font-weight: 900; }
+.gbtn.inline { flex-direction: row; gap: 8px; min-height: 42px; padding: 4px 12px; }
+.sheet-row .gbtn.inline { min-height: 42px; }
+.gbtn.pink { background: linear-gradient(#ff9fb3, #ff6f91); box-shadow: 0 5px 0 #c9486c; }
+.mood { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.mface { width: 40px; height: 40px; flex: none; }
+.mface svg { display: block; width: 100%; height: 100%; }
+.mbody { flex: 1; min-width: 0; }
+.mtop { display: flex; justify-content: space-between; align-items: baseline; font-size: 14px; }
+.mtop span { font-size: 12px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.mbar { height: 12px; margin: 3px 0; border-radius: 6px; background: #efe4c6; border: 2px solid #dccb9d; overflow: hidden; }
+.mbar i { display: block; height: 100%; border-radius: 6px; background: #8cc152; transition: width .3s linear; }
+.mbar[data-band="happy"] i { background: linear-gradient(90deg, #ffd54f, #ffb300); }
+.mbar[data-band="ok"] i { background: #8cc152; }
+.mbar[data-band="tired"] i { background: #7cc4f2; }
+.mbar[data-band="angry"] i { background: #ff7a6a; }
+.mbar[data-band="rest"] i { background: #b39ae8; }
+.mood small { display: block; font-size: 12px; color: var(--ink-soft); font-weight: 700; }
+.sheet-row.care .gbtn { min-height: 46px; padding: 4px 8px; }
+.sheet-row.care .gbtn-main { font-size: 16px; }
+.sheet-row.care .gbtn-sub { font-size: 12px; }
+.moods { display: flex; flex-wrap: wrap; gap: 2px 9px; margin-top: 4px; font-size: 11px; font-weight: 700; }
+.moods span { display: flex; align-items: center; gap: 4px; }
+.dotc { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--ink); display: inline-block; }
+.dotc[data-band="happy"] { background: #ffe27a; } .dotc[data-band="ok"] { background: #dcebaa; }
+.dotc[data-band="tired"] { background: #bcd0ea; } .dotc[data-band="angry"] { background: #ff9f8f; } .dotc[data-band="rest"] { background: #cdbdf2; }
+.kaizen { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 6px 8px; border-radius: 14px; background: #f1f6e2; border: 2px dashed #cddfa6; }
+.kz-list { flex: 1; display: flex; gap: 4px; font-size: 11px; font-weight: 900; flex-wrap: wrap; }
+.kz-list i { font-style: normal; padding: 2px 7px; border-radius: 9px; background: #e6e2d2; color: #a79f86; }
+.kz-list i.on { background: #8cc152; color: #fff; }
+.kz-done { font-size: 12px; font-weight: 900; color: var(--leaf-d); }
+.kaizen .gbtn { min-height: 40px; padding: 2px 10px; flex: none; flex-direction: row; gap: 6px; }
+.kaizen .gbtn-main { font-size: 14px; }
+.kaizen .gbtn-sub { font-size: 12px; }
+.picks-label { margin-top: 8px; font-size: 12px; font-weight: 900; color: var(--ink-soft); }
 .empty-note { padding: 10px; border-radius: 14px; background: #fff6dc; font-size: 13px; text-align: center; color: var(--ink-soft); }
 
 /* ------------------------------------------------ アルバム */

@@ -148,7 +148,8 @@
     els.albumDot.hidden = !C.CARDS.some(function (c) { return C.isNewCard(S, c.id); });
     els.freeBanner.hidden = !C.freeAvailable(S, today());
     const tax = K.pending(S, now());
-    els.kuniDot.hidden = !(tax >= 10 && tax >= K.capacity(S) * 0.5);
+    const sm = K.moodSummary(S, now());
+    els.kuniDot.hidden = !((tax >= 10 && tax >= K.capacity(S) * 0.5) || sm.tired + sm.angry > 0);
   }
   function bump(el) {
     el.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.22)' }, { transform: 'scale(1)' }], { duration: 320, easing: 'ease-out' });
@@ -394,20 +395,45 @@
   const fmt = function (n) { return String(Math.round(n * 10) / 10); };
   const pct = function (n) { return '+' + Math.round(n * 100) + '%'; };
   const shortName = function (card) { return card.name.replace(' ざっそう', ''); };
+  const BAND_NOTE = {
+    happy: 'ごきげん! ぜいきんが 2ばいに なるよ',
+    ok: 'ふつう。ぜいきんは ふつうだよ',
+    tired: 'つかれてる… ぜいきんが はんぶんに',
+    angry: 'いやだ! はたらきたくない… ぜいきんが ないよ',
+    rest: 'おやすみちゅう。げんきに なったら もどるよ'
+  };
 
   function thumbSvg(id) { return A.zassou(L.lookOf(id)); }
+
+  /** きげんの顔 (小さな SVG)。段ごとに色・目・口が変わる。 */
+  function moodFace(band) {
+    const col = { happy: '#ffe27a', ok: '#dcebaa', tired: '#bcd0ea', angry: '#ff9f8f', rest: '#cdbdf2' }[band] || '#dcebaa';
+    const ink = '#6b4a2f';
+    let f = '';
+    if (band === 'happy') f = '<path d="M5.5 9 q1.5 -2.4 3 0 M11.5 9 q1.5 -2.4 3 0" fill="none" stroke="' + ink + '" stroke-width="1.5" stroke-linecap="round"/><path d="M6.5 12 q3.5 3.6 7 0" fill="#ff8aa0" stroke="' + ink + '" stroke-width="1.2" stroke-linejoin="round"/>';
+    else if (band === 'ok') f = '<circle cx="7" cy="9" r="1.3" fill="' + ink + '"/><circle cx="13" cy="9" r="1.3" fill="' + ink + '"/><path d="M7 12.5 q3 1.6 6 0" fill="none" stroke="' + ink + '" stroke-width="1.4" stroke-linecap="round"/>';
+    else if (band === 'tired') f = '<circle cx="7" cy="9.5" r="1.3" fill="' + ink + '"/><circle cx="13" cy="9.5" r="1.3" fill="' + ink + '"/><path d="M7.5 14 q2.5 -1.8 5 0" fill="none" stroke="' + ink + '" stroke-width="1.4" stroke-linecap="round"/><path d="M16.2 4.5 q1.6 2.4 0 3.4 q-1.6 -1 0 -3.4Z" fill="#7cc4f2"/>';
+    else if (band === 'angry') f = '<path d="M4.8 6.6 L8.6 8 M15.2 6.6 L11.4 8" stroke="' + ink + '" stroke-width="1.6" stroke-linecap="round"/><circle cx="7" cy="10" r="1.2" fill="' + ink + '"/><circle cx="13" cy="10" r="1.2" fill="' + ink + '"/><path d="M7 15 q3 -2.6 6 0" fill="none" stroke="' + ink + '" stroke-width="1.5" stroke-linecap="round"/>';
+    else f = '<path d="M5.5 10 q1.5 1.6 3 0 M11.5 10 q1.5 1.6 3 0" fill="none" stroke="' + ink + '" stroke-width="1.5" stroke-linecap="round"/><text x="12.5" y="7" font-size="7" font-weight="900" fill="#7a5ec0" font-family="sans-serif">z</text>';
+    return '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="' + col + '" stroke="' + ink + '" stroke-width="1.4"/>' + f + '</svg>';
+  }
+
+  const bandOfTile = function (x, y) {
+    const m = K.moodAt(S, x, y, now());
+    return m ? m.band : null;
+  };
 
   function tileHtml(x, y) {
     const st = K.statusOf(S, x, y);
     const type = K.typeAt(x, y);
     let inner = '';
-    const cls = 'tile';
     if (st === 'owned') {
       const t = S.kuni.tiles[K.key(x, y)];
       inner = '<div class="ground">' + A.tile(type, x, y) + '</div>';
       if (t.res) {
-        inner += '<div class="res">' + thumbSvg(t.res) + '</div><span class="bonus">' + pct(K.residentBonus(S, t.res)) + '</span>';
+        inner += '<div class="res">' + thumbSvg(t.res) + '</div><span class="face" data-band="' + bandOfTile(x, y) + '">' + moodFace(bandOfTile(x, y)) + '</span>';
       }
+      if (t.up) inner += '<span class="kz" aria-label="かいぜん ' + t.up + '">' + '●'.repeat(t.up) + '</span>';
     } else if (st === 'buy') {
       const price = K.canBuy(S, x, y).price;
       inner = '<div class="ground">' + A.tile(type, x, y) + '</div><span class="price' + (S.coins >= price ? '' : ' poor') + '"><span class="coin"></span>' + price + '</span>';
@@ -415,7 +441,18 @@
       inner = '<div class="ground"></div>';
     }
     const label = st === 'owned' ? LAND_NAME[type] : st === 'buy' ? 'かえる とち' : 'まだ ひらけない とち';
-    return '<button type="button" class="' + cls + '" data-x="' + x + '" data-y="' + y + '" data-s="' + st + '" aria-label="' + label + '">' + inner + '</button>';
+    return '<button type="button" class="tile" data-x="' + x + '" data-y="' + y + '" data-s="' + st + '" aria-label="' + label + '">' + inner + '</button>';
+  }
+
+  /** 住民のきげんの段を並べた文字 (地図を描き直すかどうかの目印)。 */
+  function bandsSig() {
+    let s = '';
+    Object.keys(S.kuni.tiles).forEach(function (k) {
+      if (!S.kuni.tiles[k].res) return;
+      const p = k.split(',');
+      s += bandOfTile(Number(p[0]), Number(p[1])).charAt(0);
+    });
+    return s;
   }
 
   function renderKuni() {
@@ -424,9 +461,13 @@
     els.kuniLv.textContent = 'Lv.' + S.kuni.lv;
     els.kuniTiles.textContent = String(K.tileCount(S));
     els.kuniPeople.textContent = String(K.peopleCount(S));
-    const rate = K.ratePerHour(S);
-    els.kuniRate.innerHTML = '1じかんで <b>+' + fmt(rate) + '</b> コイン<small>ためておけるのは ' + lv.hours + 'じかんぶん (' + Math.floor(K.capacity(S)) + 'コイン)</small>';
-    const sig = JSON.stringify([S.kuni.lv, S.kuni.tiles, Math.floor(S.coins / 5), S.owned]);   // 選んだマスは入れない (枠は class だけ付け替える)
+    const rate = K.ratePerHour(S, now());
+    const sm = K.moodSummary(S, now());
+    const upset = sm.tired + sm.angry;
+    els.kuniRate.innerHTML = '1じかんで <b>+' + fmt(rate) + '</b> コイン<small>' +
+      (upset ? '<span class="upset">ふきげんな ざっそうくんが ' + upset + 'にん いるよ</span>' : 'ためておけるのは ' + lv.hours + 'じかんぶん (' + Math.floor(K.capacity(S)) + 'コイン)') + '</small>';
+    // 選んだマスは入れない (枠は class だけ付け替える)。きげんの段は時間で変わるので入れる
+    const sig = JSON.stringify([S.kuni.lv, S.kuni.tiles, Math.floor(S.coins / 5), S.owned, bandsSig()]);
     if (sig !== kuniSig) {
       kuniSig = sig;
       let h = '';
@@ -435,6 +476,7 @@
     }
     markSel();
     updateTax();
+    updateSheetLive();
   }
 
   /** 選んでいるマスの枠。地図を描き直さずに、class だけ付け替える。 */
@@ -446,7 +488,7 @@
     if (el) el.classList.add('sel');
   }
 
-  /** たまっているぜいきんの表示だけを更新する (1秒ごと)。 */
+  /** たまっているぜいきんの表示だけを更新する。 */
   function updateTax() {
     const pend = K.pending(S, now());
     const cap = K.capacity(S);
@@ -469,9 +511,9 @@
     bump(els.pillCoin);
   }
 
-  // --- 下から出る札 (土地・住民・役所)。マスの位置によって上か下に出し、選んだマスを隠さない
+  // --- 札 (土地・住民・役所)。マスの位置によって上か下に出し、選んだマスを隠さない
   function openSheet(x, y) {
-    sel = { x: x, y: y };
+    sel = { x: x, y: y, view: null };
     renderKuni();
     refreshSheet();
   }
@@ -481,12 +523,44 @@
     renderKuni();
   }
 
+  function moodRowHtml(x, y) {
+    const m = K.moodAt(S, x, y, now());
+    return '<div class="mood" id="moodRow"><span class="mface" id="moodFace">' + moodFace(m.band) + '</span>' +
+      '<div class="mbody"><div class="mtop"><b id="moodName">' + m.name + '</b><span id="moodNum">' + Math.round(m.mood) + '/100</span></div>' +
+      '<div class="mbar" data-band="' + m.band + '" id="moodBar"><i id="moodFill" style="width:' + m.mood.toFixed(1) + '%"></i></div>' +
+      '<small id="moodNote">' + BAND_NOTE[m.band] + '</small></div></div>';
+  }
+
+  /** 開いている札の「時間で変わる所」だけを、その場で書き換える (ボタンは作り直さない)。 */
+  function updateSheetLive() {
+    if (!sel || els.sheet.hidden) return;
+    const t = S.kuni.tiles[K.key(sel.x, sel.y)];
+    if (!t || !t.res) return;
+    const bar = $('moodBar');
+    if (!bar) return;
+    const m = K.moodAt(S, sel.x, sel.y, now());
+    $('moodFill').style.width = m.mood.toFixed(1) + '%';
+    bar.dataset.band = m.band;
+    $('moodName').textContent = m.name;
+    $('moodNum').textContent = Math.round(m.mood) + '/100';
+    $('moodNote').textContent = BAND_NOTE[m.band];
+    if ($('moodFace').dataset.band !== m.band) { $('moodFace').innerHTML = moodFace(m.band); $('moodFace').dataset.band = m.band; }
+    const wait = Math.max(0, t.pet + K.PET_COOLDOWN - now());
+    const pet = els.sheet.querySelector('[data-act="pet"]');
+    if (pet) {
+      pet.setAttribute('aria-disabled', wait > 0 && t.pet ? 'true' : 'false');
+      const sub = pet.querySelector('.gbtn-sub');
+      if (sub) sub.textContent = wait > 0 && t.pet ? 'あと ' + Math.ceil(wait / 60000) + 'ふん' : 'むりょう';
+    }
+  }
+
   function refreshSheet() {
     if (!sel) { els.sheet.hidden = true; return; }
     const x = sel.x, y = sel.y;
     const st = K.statusOf(S, x, y);
     const type = K.typeAt(x, y);
     els.sheet.dataset.pos = y >= 4 ? 'top' : 'bottom';
+    const nowMs = now();
     let h = '';
     const head = function (title, sub) {
       return '<div class="sheet-top"><div><h3>' + title + '</h3><small>' + sub + '</small></div><button type="button" class="sheet-x" data-act="close" aria-label="とじる">✕</button></div>';
@@ -496,52 +570,87 @@
       const gain = K.BASE_RATE * K.TYPES[type].mult * K.levelOf(S).mult;
       h = head(LAND_NAME[type] + 'の とち', 'となりに つづく あたらしい とち') +
         '<div class="sheet-body">かうと、ぜいきんが 1じかんで <b>+' + fmt(gain) + '</b> ふえるよ。' +
-        (K.TYPES[type].mult > 1 ? '<br>' + LAND_NAME[type] + 'は ふえやすい とち!' : '') + '</div>' +
+        (K.TYPES[type].mult > 1 ? '<br>' + LAND_NAME[type] + 'は ふえやすい とち!' : '') +
+        (['mori', 'mizu', 'hana'].indexOf(type) >= 0 ? '<br>すんでいる子が つかれにくい とち!' : '') + '</div>' +
         '<div class="sheet-row"><button type="button" class="gbtn gray" data-act="close"><span class="gbtn-main">やめる</span></button>' +
         '<button type="button" class="gbtn one" data-act="buy" aria-disabled="' + (c.ok ? 'false' : 'true') + '"><span class="gbtn-main">かう</span><span class="gbtn-sub"><span class="coin"></span>' + c.price + '</span></button></div>';
     } else if (st === 'owned' && type === 'yakusho') {
       const lv = K.levelOf(S);
       const info = K.upgradeInfo(S);
-      h = head('ざっそうやくしょ', lv.title + ' / Lv.' + S.kuni.lv);
-      h += '<div class="sheet-body">ぜいきんを ためて、くにを おおきく するところ。<br>ためておけるのは <b>' + lv.hours + 'じかん</b>、しゅうにゅうは <b>x' + lv.mult + '</b></div>';
+      const sm = K.moodSummary(S, nowMs);
+      const people = K.peopleCount(S);
+      h = head('ざっそうやくしょ', 'Lv.' + S.kuni.lv + ' ' + lv.title + ' ・ ' + lv.hours + 'じかんぶん ためられる');
+      if (people) {
+        h += '<div class="moods"><span><i class="dotc" data-band="happy"></i>ごきげん ' + sm.happy + '</span><span><i class="dotc" data-band="ok"></i>ふつう ' + sm.ok + '</span>' +
+          '<span><i class="dotc" data-band="tired"></i>つかれた ' + sm.tired + '</span><span><i class="dotc" data-band="angry"></i>いやだ ' + sm.angry + '</span>' + (sm.rest ? '<span><i class="dotc" data-band="rest"></i>おやすみ ' + sm.rest + '</span>' : '') + '</div>' +
+          '<div class="sheet-row"><button type="button" class="gbtn pink inline" data-act="treatall" aria-disabled="' + (S.coins >= people * K.TREAT_ALL_COST ? 'false' : 'true') + '"><span class="gbtn-main">みんなに おやつ</span><span class="gbtn-sub"><span class="coin"></span>' + people * K.TREAT_ALL_COST + '</span></button></div>';
+      }
       if (info.max) {
         h += '<div class="empty-note">やくしょは いちばん おおきくなったよ!</div>';
       } else {
         const n = info.next;
         const lack = function (what) { return info.lacks.some(function (l) { return l.what === what; }); };
-        h += '<div class="sheet-body" style="margin-top:6px">Lv.' + n.lv + ' <b>' + n.title + '</b> に するには:</div><ul class="need">' +
+        h += '<div class="need-title">Lv.' + n.lv + ' <b>' + n.title + '</b> に するには</div><ul class="need">' +
           '<li class="' + (lack('tiles') ? '' : 'ok') + '">とちが ' + n.need.tiles + 'こ いじょう (いま ' + K.tileCount(S) + ')</li>' +
           (n.need.people ? '<li class="' + (lack('people') ? '' : 'ok') + '">すみびとが ' + n.need.people + 'にん いじょう (いま ' + K.peopleCount(S) + ')</li>' : '') +
           '<li class="' + (lack('coins') ? '' : 'ok') + '">コイン ' + n.cost + '</li></ul>' +
-          '<div class="sheet-row"><button type="button" class="gbtn ten" data-act="upgrade" aria-disabled="' + (info.ok ? 'false' : 'true') + '"><span class="gbtn-main">レベルアップ</span>' +
+          '<div class="sheet-row"><button type="button" class="gbtn ten inline" data-act="upgrade" aria-disabled="' + (info.ok ? 'false' : 'true') + '"><span class="gbtn-main">レベルアップ</span>' +
           '<span class="gbtn-sub"><span class="coin"></span>' + n.cost + '</span></button></div>';
       }
     } else if (st === 'owned') {
       const t = S.kuni.tiles[K.key(x, y)];
       const base = K.TYPES[type].mult;
-      h = head(LAND_NAME[type], 'ぜいきん 1じかんで +' + fmt(K.tileRate(S, x, y) * K.levelOf(S).mult) + ' (' + (base > 1 ? 'ふえやすい とち' : 'ふつうの とち') + ')');
-      if (t.res) {
+      const view = sel.view || (t.res ? 'care' : 'pick');
+      const tags = (base > 1 ? ' ・ふえやすい' : '') + (['mori', 'mizu', 'hana'].indexOf(type) >= 0 ? ' ・つかれにくい' : '');
+      h = head(LAND_NAME[type], 'ぜいきん +' + fmt(K.tileRate(S, x, y, nowMs) * K.levelOf(S).mult) + ' /じかん' + tags);
+      if (view === 'care') {
         const card = C.cardById(t.res);
-        h += '<div class="sheet-body res-now"><div class="thumb">' + thumbSvg(t.res) + '</div><div class="meta"><b>' + shortName(card) + '</b>' +
-          '<small>ぜいきん ' + pct(K.residentBonus(S, t.res)) + '</small></div>' +
-          '<button type="button" class="gbtn gray" data-act="home"><span class="gbtn-main">かえす</span></button></div>';
+        h += '<div class="res-now"><div class="thumb">' + thumbSvg(t.res) + '</div><div class="meta"><b>' + shortName(card) + '</b>' +
+          '<small>ぜいきん ' + pct(K.residentBonus(S, t.res)) + ' (ごきげんで 2ばい)</small></div>' +
+          '<button type="button" class="gbtn gray" data-act="swap"><span class="gbtn-main">かえる</span></button></div>' + moodRowHtml(x, y);
+        const m = K.moodAt(S, x, y, nowMs);
+        const wait = Math.max(0, t.pet + K.PET_COOLDOWN - nowMs);
+        const petOff = wait > 0 && t.pet;
+        h += '<div class="sheet-row care">' +
+          '<button type="button" class="gbtn one" data-act="pet" aria-disabled="' + (petOff ? 'true' : 'false') + '"><span class="gbtn-main">なでる</span><span class="gbtn-sub">' + (petOff ? 'あと ' + Math.ceil(wait / 60000) + 'ふん' : 'むりょう') + '</span></button>' +
+          '<button type="button" class="gbtn pink" data-act="treat" aria-disabled="' + (S.coins >= K.TREAT_COST ? 'false' : 'true') + '"><span class="gbtn-main">おやつ</span><span class="gbtn-sub"><span class="coin"></span>' + K.TREAT_COST + '</span></button>' +
+          '<button type="button" class="gbtn ' + (m.rest ? 'ten' : 'gray') + '" data-act="rest"><span class="gbtn-main">' + (m.rest ? 'はたらく' : 'やすませる') + '</span></button></div>';
+        const imp = K.improveInfo(S, x, y);
+        const kz = K.KAIZEN.map(function (k, i) { return '<i class="' + (i < t.up ? 'on' : '') + '">' + k.name + '</i>'; }).join('');
+        h += '<div class="kaizen"><div class="kz-list">' + kz + '</div>' +
+          (imp.item ? '<button type="button" class="gbtn ten" data-act="improve" aria-disabled="' + (imp.ok ? 'false' : 'true') + '"><span class="gbtn-main">' + imp.item.name + 'を おく</span><span class="gbtn-sub"><span class="coin"></span>' + imp.cost + '</span></button>' : '<span class="kz-done">ぜんぶ おいたよ!</span>') +
+          '</div>';
       } else {
-        h += '<div class="sheet-body">ざっそうくんを すませると、ぜいきんが ふえるよ。</div>';
-      }
-      const picks = C.CARDS.filter(function (c) { return K.freeCopies(S, c.id) > 0; })
-        .sort(function (a, b) { return K.residentBonus(S, b.id) - K.residentBonus(S, a.id); });
-      if (picks.length) {
-        h += '<div class="picks">' + picks.map(function (c) {
-          const free = K.freeCopies(S, c.id);
-          return '<button type="button" class="pick" data-act="pick" data-id="' + c.id + '"><div class="thumb">' + thumbSvg(c.id) + '</div>' +
-            '<span class="nm">' + shortName(c) + '</span><span class="up">' + pct(K.residentBonus(S, c.id)) + '</span>' + (free > 1 ? '<span class="n">あと ' + free + 'まい</span>' : '') + '</button>';
-        }).join('') + '</div>';
-      } else if (!t.res) {
-        h += '<div class="empty-note">すませる ざっそうくんが いないよ。<br>ガチャで あつめよう!</div>';
+        const picks = C.CARDS.filter(function (c) { return K.freeCopies(S, c.id) > 0; })
+          .sort(function (a, b) { return K.residentBonus(S, b.id) - K.residentBonus(S, a.id); });
+        h += '<div class="picks-label">' + (t.res ? 'ほかの子と かえる' : 'すませる子を えらぶ') + '</div>';
+        if (picks.length) {
+          h += '<div class="picks">' + picks.map(function (c) {
+            const free = K.freeCopies(S, c.id);
+            return '<button type="button" class="pick" data-act="pick" data-id="' + c.id + '"><div class="thumb">' + thumbSvg(c.id) + '</div>' +
+              '<span class="nm">' + shortName(c) + '</span><span class="up">' + pct(K.residentBonus(S, c.id)) + '</span>' + (free > 1 ? '<span class="n">あと ' + free + 'まい</span>' : '') + '</button>';
+          }).join('') + '</div>';
+        } else {
+          h += '<div class="empty-note">すませる ざっそうくんが いないよ。<br>ガチャで あつめよう!</div>';
+        }
+        h += '<div class="sheet-row">' + (t.res ? '<button type="button" class="gbtn gray" data-act="back"><span class="gbtn-main">もどる</span></button><button type="button" class="gbtn gray" data-act="home"><span class="gbtn-main">おうちへ かえす</span></button>' : '') + '</div>';
+        if (!t.res) {
+          const imp = K.improveInfo(S, x, y);
+          const kz = K.KAIZEN.map(function (k, i) { return '<i class="' + (i < t.up ? 'on' : '') + '">' + k.name + '</i>'; }).join('');
+          h += '<div class="kaizen"><div class="kz-list">' + kz + '</div>' +
+            (imp.item ? '<button type="button" class="gbtn ten" data-act="improve" aria-disabled="' + (imp.ok ? 'false' : 'true') + '"><span class="gbtn-main">' + imp.item.name + 'を おく</span><span class="gbtn-sub"><span class="coin"></span>' + imp.cost + '</span></button>' : '<span class="kz-done">ぜんぶ おいたよ!</span>') + '</div>';
+        }
       }
     }
     els.sheet.innerHTML = h;
     els.sheet.hidden = false;
+  }
+
+  function tileCenter(x, y) {
+    const el = els.kuniMap.querySelector('.tile[data-x="' + x + '"][data-y="' + y + '"]');
+    if (!el) return { x: 215, y: 400 };
+    const b = el.getBoundingClientRect();
+    return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
   }
 
   function onSheetClick(e) {
@@ -552,17 +661,19 @@
     if (el.getAttribute('aria-disabled') === 'true') {
       if (act === 'buy') toast('コインが たりないよ!\nホームで なでて ためよう');
       if (act === 'upgrade') toast('まだ じょうけんが そろってないよ');
+      if (act === 'treat' || act === 'treatall' || act === 'improve') toast('コインが たりないよ!');
+      if (act === 'pet') toast('さっき なでたばかりだよ\nすこし まってね');
       return;
     }
+    const x = sel.x, y = sel.y;
     if (act === 'buy') {
-      const r = K.buy(S, sel.x, sel.y, now());
+      const r = K.buy(S, x, y, now());
       if (r.ok) {
-        const tx = sel.x, ty = sel.y;
         commit(r.state);
         sel = null;
         els.sheet.hidden = true;
         renderKuni();
-        const tile = els.kuniMap.querySelector('.tile[data-x="' + tx + '"][data-y="' + ty + '"]');
+        const tile = els.kuniMap.querySelector('.tile[data-x="' + x + '"][data-y="' + y + '"]');
         if (tile) {
           tile.animate([{ transform: 'scale(.6)' }, { transform: 'scale(1.18)', offset: 0.6 }, { transform: 'scale(1)' }], { duration: 420, easing: 'ease-out' });
           const b = tile.getBoundingClientRect();
@@ -572,9 +683,57 @@
       } else {
         toast('かえなかったよ');
       }
+    } else if (act === 'swap') {
+      sel.view = 'pick';
+      refreshSheet();
+    } else if (act === 'back') {
+      sel.view = 'care';
+      refreshSheet();
     } else if (act === 'pick' || act === 'home') {
-      const r = K.assign(S, sel.x, sel.y, act === 'pick' ? el.dataset.id : null, now());
+      const r = K.assign(S, x, y, act === 'pick' ? el.dataset.id : null, now());
+      sel.view = null;
       if (r.ok) commit(r.state);
+    } else if (act === 'pet') {
+      const r = K.pet(S, x, y, now());
+      if (r.ok) {
+        commit(r.state);
+        const c = tileCenter(x, y);
+        floatText('♥', c.x - 8, c.y - 20);
+        floatText('♥', c.x + 8, c.y - 6);
+        const face = $('moodFace');
+        if (face) face.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.3)' }, { transform: 'scale(1)' }], { duration: 320, easing: 'ease-out' });
+      } else if (r.reason === 'cooldown') {
+        toast('さっき なでたばかりだよ\nあと ' + Math.ceil(r.wait / 60000) + 'ふん');
+      }
+    } else if (act === 'treat') {
+      const r = K.treat(S, x, y, now());
+      if (r.ok) {
+        commit(r.state);
+        const c = tileCenter(x, y);
+        floatText('おいしい!', c.x - 36, c.y - 24);
+        burst(c.x, c.y, 'N', 0.4);
+      } else if (r.reason === 'full') {
+        toast('もう げんきいっぱいだよ!');
+      }
+    } else if (act === 'treatall') {
+      const r = K.treatAll(S, now());
+      if (r.ok) {
+        commit(r.state);
+        burst(215, 360, 'R', 0.9);
+        toast('みんなに おやつを あげたよ!');
+      }
+    } else if (act === 'rest') {
+      const m = K.moodAt(S, x, y, now());
+      const r = K.setRest(S, x, y, !m.rest, now());
+      if (r.ok) commit(r.state);
+    } else if (act === 'improve') {
+      const r = K.improve(S, x, y, now());
+      if (r.ok) {
+        commit(r.state);
+        const c = tileCenter(x, y);
+        burst(c.x, c.y, 'R', 0.5);
+        toast(r.item.name + 'を おいたよ!\nつかれにくく なったよ');
+      }
     } else if (act === 'upgrade') {
       const r = K.upgrade(S, now());
       if (r.ok) {
@@ -879,7 +1038,7 @@
     els.sheet.addEventListener('click', onSheetClick);
     els.taxBtn.addEventListener('click', onTax);
     // 国のぜいきんは時間でたまる。見ている間は 1秒ごとに表示を進め、赤い点は 20秒ごとに見直す
-    setInterval(function () { if (!document.hidden && currentScreen === 'kuniScreen') updateTax(); }, 1000);
+    setInterval(function () { if (!document.hidden && currentScreen === 'kuniScreen') renderKuni(); }, 1000);
     setInterval(function () { if (!document.hidden) renderHud(); }, 20000);
     els.freeBanner.addEventListener('click', function () { show('gachaScreen'); });
     els.btnFree.addEventListener('click', function () { startDraw('free'); });
@@ -920,7 +1079,7 @@
     window.__app = {
       version: VERSION,
       state: function () { return S; },
-      setState: function (s) { commit(s, true); },
+      setState: function (s) { commit(K.normalize(s), true); },   // 読み込みと同じく、国の形をそろえてから使う
       setRng: function (f) { rngOverride = f; },
       setNow: function (ms) { nowOverride = ms; renderHud(); if (currentScreen === 'kuniScreen') renderKuni(); },
       setToday: function (d) { todayOverride = d; renderHud(); renderGacha(); },

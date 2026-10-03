@@ -186,24 +186,235 @@ test('国づくりが無い古い保存でも読めて、ガチャは国の状�
   assert.strictEqual(Kuni.tileCount(r.state), 6);
 });
 
+// ---------------------------------------------------------------- きげん
+const MIN = 60000;
+/** 住民を 1人住まわせた、時計つきの状態。 */
+function withWorker(id, x, y, extra) {
+  let s = Kuni.settle(fresh(Object.assign({ coins: 100000, owned: { [id]: 1 } }, extra || {})), T0);
+  s = Kuni.assign(s, x, y, id, T0).state;
+  return s;
+}
+
+test('きげんの式は、時間を細かく刻んだ数値計算と合う (下がる・やすむ・段をまたぐ、200通り)', () => {
+  const rng = Core.mulberry32(11);
+  for (let i = 0; i < 200; i++) {
+    const m0 = rng() * 100, rest = rng() < 0.3, d = rng() * 9, T = rng() * 30;
+    const r = Kuni.integrate(m0, rest, d, T);
+    // 数値計算 (0.001 時間刻み)
+    let m = m0, rs = rest, area = 0;
+    const dt = 0.001;
+    for (let t = 0; t < T - 1e-12; t += dt) {
+      const h = Math.min(dt, T - t);
+      if (rs) { m += Kuni.REST_RATE * h; if (m >= 100) { m = 100; rs = false; } }
+      else { area += Kuni.bandOf(m).mult * h; m = Math.max(0, m - d * h); }
+    }
+    assert.ok(Math.abs(r.mood - m) < 0.2, `#${i} きげん ${r.mood} vs ${m} (m0=${m0.toFixed(1)} rest=${rest} d=${d.toFixed(2)} T=${T.toFixed(1)})`);
+    assert.ok(Math.abs(r.area - area) < 0.05 + T * 0.003, `#${i} 面積 ${r.area} vs ${area}`);
+    assert.strictEqual(r.rest, rs, `#${i} やすみ`);
+  }
+});
+
+test('住むと「ふつう(60)」から、働くあいだ ゆっくり下がり、いやだ!まで行く', () => {
+  const s = withWorker('futsu', 2, 3, {});
+  const m0 = Kuni.moodAt(s, 2, 3, T0);
+  assert.strictEqual(m0.mood, Kuni.MOOD_START);
+  assert.strictEqual(m0.band, 'ok');
+  const names = [0, 2, 4, 6, 8, 12, 30].map((h) => Kuni.moodAt(s, 2, 3, T0 + h * H).band);
+  assert.deepStrictEqual(names.slice(0, 1), ['ok']);
+  assert.strictEqual(names[names.length - 1], 'angry', '30時間ほうっておくと「いやだ!」');
+  const seq = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 20].map((h) => Kuni.moodAt(s, 2, 3, T0 + h * H).mood);
+  for (let i = 1; i < seq.length; i++) assert.ok(seq[i] <= seq[i - 1], 'ずっと上がらず下がる');
+  assert.ok(seq.every((v) => v >= 0 && v <= 100));
+});
+
+test('土地と性格で疲れかたが違う: はなばたけ・もりは疲れにくい / おかは疲れやすい / のんびりな子は疲れにくい', () => {
+  const dec = (id, x, y, extra) => Kuni.decayRate(withWorker(id, x, y, extra), x, y);
+  // (2,3)=はなばたけ, (3,2)=はなばたけ(row2 col3)… 土地の種類を直接調べる
+  const hana = dec('futsu', 2, 3), nohara = (() => {
+    let s = withWorker('futsu', 3, 4, {});          // (3,4) = はなばたけ
+    return Kuni.decayRate(s, 3, 4);
+  })();
+  assert.strictEqual(Kuni.typeAt(2, 3), 'hana');
+  // のはらのマスを作る: (2,2) は nohara
+  let s2 = Kuni.settle(fresh({ coins: 1e6, owned: { futsu: 1 } }), T0);
+  s2 = Kuni.buy(s2, 2, 2, T0).state;
+  s2 = Kuni.assign(s2, 2, 2, 'futsu', T0).state;
+  assert.strictEqual(Kuni.typeAt(2, 2), 'nohara');
+  const noharaDecay = Kuni.decayRate(s2, 2, 2);
+  assert.ok(hana < noharaDecay * 0.7, `はなばたけ ${hana} < のはら ${noharaDecay}`);
+  // のんびり: futsu(のんびり4) と ofuro(のんびり5) と ninja(のんびり2) を同じ土地で
+  const lazy = Kuni.decayRate(withWorker('ofuro', 2, 3), 2, 3);
+  const brisk = Kuni.decayRate(withWorker('ninja', 2, 3), 2, 3);
+  assert.ok(lazy < brisk, `のんびり5 ${lazy} < のんびり2 ${brisk}`);
+  assert.ok(nohara > 0);
+});
+
+test('ごきげんだと 住民ぶんが 2倍、つかれると半分、いやだ!だと 0 (同じ時間で比べる)', () => {
+  const income = (mood) => {
+    let s = withWorker('ogon', 2, 3, {});
+    s.kuni.tiles['2,3'].mood = mood;
+    s.kuni.tiles['2,3'].up = 3;            // 疲れにくくして、短い時間の収入だけを見る
+    return Kuni.tileRate(s, 2, 3, T0);
+  };
+  const land = Kuni.BASE_RATE * Kuni.TYPES.hana.mult;
+  const bonus = Kuni.residentBonus(withWorker('ogon', 2, 3, {}), 'ogon');
+  assert.ok(Math.abs(income(90) - land * (1 + bonus * 2)) < 1e-9, 'ごきげん x2');
+  assert.ok(Math.abs(income(55) - land * (1 + bonus)) < 1e-9, 'ふつう x1');
+  assert.ok(Math.abs(income(30) - land * (1 + bonus * 0.5)) < 1e-9, 'つかれた x0.5');
+  assert.ok(Math.abs(income(5) - land) < 1e-9, 'いやだ!は 土地のぶんだけ');
+  assert.ok(income(90) > income(55) && income(55) > income(30) && income(30) > income(5));
+});
+
+test('きげんが下がっていくあいだ、ぜいきんは 段ごとに変わる (積み上がりが実際の式と合う)', () => {
+  let s = withWorker('ogon', 2, 3, {});
+  s.kuni.tiles['2,3'].mood = 100;
+  const now = T0 + 10 * H;
+  const fast = Kuni.pending(s, now);
+  // 10時間を 0.01 時間ずつ settle しても、まとめて出しても同じ
+  let a = s;
+  for (let i = 1; i <= 100; i++) a = Kuni.settle(a, T0 + i * 0.1 * H);
+  assert.ok(Math.abs(a.kuni.stored - Math.min(Kuni.capacity(a), fast)) < 0.6, `刻み ${a.kuni.stored} vs まとめ ${fast}`);
+  assert.ok(Math.abs(Kuni.moodAt(a, 2, 3, T0 + 10 * H).mood - Kuni.moodAt(s, 2, 3, now).mood) < 0.01, 'きげんも同じ');
+});
+
+test('なでる: 無料で +10。10分たつまで もう一度はできない', () => {
+  const s = withWorker('futsu', 2, 3, {});
+  const a = Kuni.pet(s, 2, 3, T0);
+  assert.ok(a.ok);
+  assert.strictEqual(Kuni.moodAt(a.state, 2, 3, T0).mood, Kuni.MOOD_START + Kuni.PET_GAIN);
+  assert.strictEqual(a.state.coins, s.coins, 'コインはかからない');
+  const b = Kuni.pet(a.state, 2, 3, T0 + 5 * MIN);
+  assert.strictEqual(b.ok, false);
+  assert.strictEqual(b.reason, 'cooldown');
+  assert.ok(b.wait > 0 && b.wait <= 5 * MIN);
+  assert.ok(Kuni.pet(a.state, 2, 3, T0 + 10 * MIN + 1).ok, '10分あとはできる');
+  assert.strictEqual(Kuni.pet(s, 3, 4, T0).reason, 'nobody', '誰もいないマス');
+  const top = Kuni.pet(Object.assign(Core.clone(s)), 2, 3, T0).state;
+  top.kuni.tiles['2,3'].mood = 98; top.kuni.tiles['2,3'].pet = 0;
+  assert.strictEqual(Kuni.moodAt(Kuni.pet(top, 2, 3, T0 + 1).state, 2, 3, T0 + 1).mood <= 100, true, '100 を越えない');
+});
+
+test('おやつ: コインで +40。コインが足りないと使えず、満タンにも使えない', () => {
+  const s = withWorker('futsu', 2, 3, { coins: 100 });
+  const a = Kuni.treat(s, 2, 3, T0);
+  assert.ok(a.ok);
+  assert.strictEqual(a.state.coins, 100 - Kuni.TREAT_COST);
+  assert.strictEqual(Kuni.moodAt(a.state, 2, 3, T0).mood, 100);
+  assert.strictEqual(Kuni.treat(a.state, 2, 3, T0).reason, 'full');
+  const poor = Object.assign(Core.clone(s), { coins: 3 });
+  assert.strictEqual(Kuni.treat(poor, 2, 3, T0).reason, 'coins');
+  assert.strictEqual(Kuni.treat(poor, 2, 3, T0).state, poor);
+});
+
+test('みんなにおやつ: 人数ぶんのコインで、全員 +30', () => {
+  let s = Kuni.settle(fresh({ coins: 1000, owned: { futsu: 2, ame: 1 } }), T0);
+  s = Kuni.assign(s, 2, 3, 'futsu', T0).state;
+  s = Kuni.assign(s, 4, 3, 'futsu', T0).state;
+  s = Kuni.assign(s, 3, 2, 'ame', T0).state;
+  const r = Kuni.treatAll(s, T0);
+  assert.ok(r.ok);
+  assert.strictEqual(r.price, 3 * Kuni.TREAT_ALL_COST);
+  assert.strictEqual(r.state.coins, 1000 - 30);
+  [['2,3'], ['4,3'], ['3,2']].forEach(([k]) => assert.strictEqual(r.state.kuni.tiles[k].mood, Kuni.MOOD_START + Kuni.TREAT_ALL_GAIN));
+  assert.strictEqual(Kuni.treatAll(fresh({ coins: 1000 }), T0).reason, 'nobody');
+  assert.strictEqual(Kuni.treatAll(Object.assign(Core.clone(s), { coins: 5 }), T0).reason, 'coins');
+});
+
+test('やすませる: 住民ぶんの収入は止まるが、きげんが戻って 100 になると自分で働きにもどる', () => {
+  let s = withWorker('ogon', 2, 3, {});
+  s.kuni.tiles['2,3'].mood = 20;
+  const r = Kuni.setRest(s, 2, 3, true, T0);
+  assert.ok(r.ok);
+  const land = Kuni.BASE_RATE * Kuni.TYPES.hana.mult;
+  assert.ok(Math.abs(Kuni.tileRate(r.state, 2, 3, T0) - land) < 1e-9, 'やすみ中は土地のぶんだけ');
+  const m2 = Kuni.moodAt(r.state, 2, 3, T0 + 2 * H);
+  assert.ok(Math.abs(m2.mood - (20 + 2 * Kuni.REST_RATE)) < 1e-6 && m2.band === 'rest');
+  const back = Kuni.moodAt(r.state, 2, 3, T0 + 6 * H);     // (100-20)/15 = 5.33 時間で全快
+  assert.strictEqual(back.rest, false, '全快すると働きにもどる');
+  assert.ok(back.mood > 90 && back.mood <= 100);
+  assert.strictEqual(Kuni.setRest(r.state, 3, 4, true, T0).reason, 'nobody');
+});
+
+test('改善: ベンチ → おちゃや → おふろ。買うほど疲れにくくなり、最後まで行くと止まる', () => {
+  let s = withWorker('futsu', 2, 3, { coins: 5000 });
+  const d0 = Kuni.decayRate(s, 2, 3);
+  const costs = [];
+  for (let i = 0; i < 3; i++) {
+    const info = Kuni.improveInfo(s, 2, 3);
+    costs.push(info.cost);
+    const r = Kuni.improve(s, 2, 3, T0);
+    assert.ok(r.ok);
+    assert.strictEqual(r.state.coins, s.coins - info.cost);
+    s = r.state;
+  }
+  assert.deepStrictEqual(costs, [80, 250, 700]);
+  assert.ok(Math.abs(Kuni.decayRate(s, 2, 3) - d0 * 0.8 * 0.65 * 0.5) < 1e-9, '全部で 0.8 x 0.65 x 0.5');
+  assert.strictEqual(Kuni.improveInfo(s, 2, 3).reason, 'max');
+  assert.strictEqual(Kuni.improve(s, 2, 3, T0).ok, false);
+  const poor = Object.assign(Core.clone(withWorker('futsu', 2, 3, {})), { coins: 10 });
+  assert.strictEqual(Kuni.improve(poor, 2, 3, T0).reason, 'coins');
+  assert.strictEqual(Kuni.improve(withWorker('futsu', 2, 3, { coins: 999 }), 3, 3, T0).ok, false, '役所には置けない');
+  // 住民がいなくなっても、改善は土地に残る
+  const gone = Kuni.assign(s, 2, 3, null, T0).state;
+  assert.strictEqual(gone.kuni.tiles['2,3'].up, 3);
+});
+
+test('別の子に入れ替えたら ふつう(60)から。同じ子を選び直してもきげんは変わらない', () => {
+  let s = withWorker('futsu', 2, 3, { owned: { futsu: 1, ame: 1 } });
+  s.owned.ame = 1;
+  s.kuni.tiles['2,3'].mood = 90;
+  const same = Kuni.assign(s, 2, 3, 'futsu', T0).state;
+  assert.strictEqual(same.kuni.tiles['2,3'].mood, 90);
+  const swap = Kuni.assign(s, 2, 3, 'ame', T0).state;
+  assert.strictEqual(swap.kuni.tiles['2,3'].mood, Kuni.MOOD_START);
+});
+
+test('きげんの内訳が数えられる', () => {
+  let s = Kuni.settle(fresh({ coins: 0, owned: { futsu: 1, ame: 1, ogon: 1 } }), T0);
+  s = Kuni.assign(s, 2, 3, 'futsu', T0).state;
+  s = Kuni.assign(s, 4, 3, 'ame', T0).state;
+  s = Kuni.assign(s, 3, 2, 'ogon', T0).state;
+  s.kuni.tiles['2,3'].mood = 95; s.kuni.tiles['4,3'].mood = 25; s.kuni.tiles['3,2'].mood = 3;
+  assert.deepStrictEqual(Kuni.moodSummary(s, T0), { happy: 1, ok: 0, tired: 1, angry: 1, rest: 0 });
+});
+
+test('壊れたきげんの保存も直る (マイナス・100超え・文字・改善の段が多すぎる)', () => {
+  const odd = Core.deserialize(JSON.stringify({
+    owned: { ame: 1 },
+    kuni: { lv: 1, tiles: { '4,4': { res: 'ame', mood: 900, rest: 'はい', up: 99, pet: -5 }, '5,4': { res: null, mood: 'x', rest: true, up: -2 } } }
+  }));
+  const fixed = Kuni.normalize(odd);
+  const a = fixed.kuni.tiles['4,4'], b = fixed.kuni.tiles['5,4'];
+  assert.strictEqual(a.mood, 100);
+  assert.strictEqual(a.up, 3);
+  assert.strictEqual(a.pet, 0);
+  assert.strictEqual(a.rest, true);
+  assert.strictEqual(b.mood, Kuni.MOOD_START);
+  assert.strictEqual(b.rest, false, '住民のいないマスは やすまない');
+  assert.strictEqual(b.up, 0);
+});
+
 // ---------------------------------------------------------------- 自動で遊ばせる
 /**
- * 1日 3回 (朝・昼・夜) 開く子。なでて・受け取って・住民を最善にならべ、
- * 役所を上げ、残りを 土地 : ガチャ = landShare : (1 - landShare) に使う。
+ * 1日 3回 (朝・昼・夜) 開く子。なでて・受け取って・住民を入れ、役所を上げ、
+ * 残りを 土地 : ガチャ = landShare : (1 - landShare) に使う。
+ * care: 'full'  なでる・疲れた子におやつ・余裕があれば改善 / 'none' きげんを気にしない
  */
-function playKuni(seed, { days = 120, tapsPerDay = 200, landShare = 0.5 } = {}) {
+function playKuni(seed, { days = 100, tapsPerDay = 200, landShare = 0.5, care = 'full' } = {}) {
   const rng = Core.mulberry32(seed);
   let s = Kuni.normalize(Core.newState());
-  const log = { cards: Infinity, tiles49: Infinity, lv: [Infinity, Infinity, Infinity, Infinity, Infinity, Infinity], coinsDay: [] };
-  const arrange = () => {
-    // 住民を、収入の高いマス × 高い増え方の順に入れなおす
-    Object.keys(s.kuni.tiles).forEach((k) => { s.kuni.tiles[k].res = null; });
-    const copies = [];
-    Object.keys(s.owned).forEach((id) => { for (let i = 0; i < s.owned[id]; i++) copies.push(id); });
-    copies.sort((a, b) => Kuni.residentBonus(s, b) - Kuni.residentBonus(s, a));
-    const spots = Object.keys(s.kuni.tiles).filter((k) => k !== '3,3')
-      .sort((a, b) => Kuni.TYPES[Kuni.typeAt(...b.split(',').map(Number))].mult - Kuni.TYPES[Kuni.typeAt(...a.split(',').map(Number))].mult);
-    spots.forEach((k, i) => { if (copies[i]) s.kuni.tiles[k].res = copies[i]; });
+  const log = { cards: Infinity, tiles49: Infinity, lv: [Infinity, Infinity, Infinity, Infinity, Infinity, Infinity], income: 0, angryHours: 0 };
+  const mult = (k) => Kuni.TYPES[Kuni.typeAt(...k.split(',').map(Number))].mult;
+  const fillEmpty = (now) => {
+    // あいている土地(収入の大きい順)に、まだ住んでいない子を 増え方の大きい順に入れる
+    const spots = Object.keys(s.kuni.tiles).filter((k) => k !== '3,3' && !s.kuni.tiles[k].res).sort((a, b) => mult(b) - mult(a));
+    for (const k of spots) {
+      const [x, y] = k.split(',').map(Number);
+      let best = null;
+      for (const id of Object.keys(s.owned)) if (Kuni.freeCopies(s, id) > 0 && (!best || Kuni.residentBonus(s, id) > Kuni.residentBonus(s, best))) best = id;
+      if (!best) break;
+      s = Kuni.assign(s, x, y, best, now).state;
+    }
   };
   for (let day = 0; day < days; day++) {
     for (const hour of [8, 13, 19]) {
@@ -211,50 +422,70 @@ function playKuni(seed, { days = 120, tapsPerDay = 200, landShare = 0.5 } = {}) 
       if (hour === 8) for (let i = 0; i < tapsPerDay; i++) s = Core.tap(s).state;
       if (hour === 8) { const f = Core.draw(s, 'free', rng, 'd' + day); if (f.ok) s = f.state; }
       s = Kuni.collect(s, now).state;
-      arrange();
+      fillEmpty(now);
+      if (care === 'full') {
+        for (const k of Object.keys(s.kuni.tiles)) {
+          const [x, y] = k.split(',').map(Number);
+          if (!s.kuni.tiles[k].res) continue;
+          const p = Kuni.pet(s, x, y, now); if (p.ok) s = p.state;
+          const m = Kuni.moodAt(s, x, y, now);
+          if (m && m.mood < 40 && s.coins >= 200) { const t = Kuni.treat(s, x, y, now); if (t.ok) s = t.state; }
+        }
+      }
       s = Kuni.settle(s, now);
       for (let guard = 0; guard < 6; guard++) { const u = Kuni.upgrade(s, now); if (!u.ok) break; s = u.state; }
-      // 土地: 予算の landShare を、安い順に買う
       let landBudget = Math.floor(s.coins * landShare);
       for (let guard = 0; guard < 60; guard++) {
         let best = null;
         for (let y = 0; y < 7; y++) for (let x = 0; x < 7; x++) {
           const c = Kuni.canBuy(s, x, y);
-          if (c.ok && c.price <= landBudget && (!best || Kuni.typeAt(x, y) !== 'x')) { if (!best || Kuni.TYPES[Kuni.typeAt(x, y)].mult > Kuni.TYPES[Kuni.typeAt(...best)].mult) best = [x, y]; }
+          if (c.ok && c.price <= landBudget && (!best || Kuni.TYPES[Kuni.typeAt(x, y)].mult > Kuni.TYPES[Kuni.typeAt(...best)].mult)) best = [x, y];
         }
         if (!best) break;
         const r = Kuni.buy(s, best[0], best[1], now);
         landBudget -= r.price;
         s = r.state;
       }
-      // カードが全部そろったら、もう回さない (コインは土地とレベルアップに回る)
+      if (care === 'full') {          // 余ったコインの一部で、住民のいる土地を改善 (安い順)
+        let kaizenBudget = Math.floor(s.coins * 0.15);
+        for (const k of Object.keys(s.kuni.tiles)) {
+          const [x, y] = k.split(',').map(Number);
+          if (!s.kuni.tiles[k].res) continue;
+          const info = Kuni.improveInfo(s, x, y);
+          if (info.cost && info.cost <= kaizenBudget) { const r = Kuni.improve(s, x, y, now); if (r.ok) { kaizenBudget -= info.cost; s = r.state; } }
+        }
+      }
       while (Core.ownedCount(s) < Core.CARDS.length && s.coins >= Core.PRICE_TEN) s = Core.draw(s, 'ten', rng, 'd' + day).state;
       while (Core.ownedCount(s) < Core.CARDS.length && s.coins >= Core.PRICE_ONE) s = Core.draw(s, 'one', rng, 'd' + day).state;
-      arrange();
+      fillEmpty(now);
       s = Kuni.settle(s, now);
     }
     if (log.cards === Infinity && Core.ownedCount(s) === Core.CARDS.length) log.cards = day + 1;
     if (log.tiles49 === Infinity && Kuni.tileCount(s) === 49) log.tiles49 = day + 1;
-    if (log.lv[s.kuni.lv] === Infinity) for (let l = 1; l <= s.kuni.lv; l++) if (log.lv[l] === Infinity) log.lv[l] = day + 1;
+    for (let l = 1; l <= s.kuni.lv; l++) if (log.lv[l] === Infinity) log.lv[l] = day + 1;
   }
   log.final = s;
   return log;
 }
 
 const median = (a) => a.slice().sort((x, y) => x - y)[Math.floor(a.length / 2)];
+const summary = (runs) => ({
+  cards: median(runs.map((r) => r.cards)), tiles: median(runs.map((r) => r.tiles49)),
+  tilesMax: Math.max(...runs.map((r) => r.tiles49)), tilesMin: Math.min(...runs.map((r) => r.tiles49)),
+  lv: [2, 3, 4, 5].map((l) => median(runs.map((r) => r.lv[l])))
+});
 
-test('毎日 3回開く子の進み方 (20人): 地図が埋まり、役所が Lv5 になるまで', () => {
-  const runs = [];
-  for (let seed = 1; seed <= 20; seed++) runs.push(playKuni(seed));
-  const cards = runs.map((r) => r.cards);
-  const tiles = runs.map((r) => r.tiles49);
-  const lv = [2, 3, 4, 5].map((l) => median(runs.map((r) => r.lv[l])));
-  console.log(`  [測定] カード全部: 中央 ${median(cards)} 日 (最短 ${Math.min(...cards)} / 最長 ${Math.max(...cards)})`);
-  console.log(`  [測定] 地図 49マス: 中央 ${median(tiles)} 日 (最短 ${Math.min(...tiles)} / 最長 ${Math.max(...tiles)})`);
-  console.log(`  [測定] 役所 Lv2/3/4/5: 中央 ${lv.join(' / ')} 日`);
+test('毎日 3回開く子の進み方: 世話をする子としない子 (各 12人)', () => {
+  const full = []; const none = [];
+  for (let seed = 1; seed <= 12; seed++) { full.push(playKuni(seed, { care: 'full' })); none.push(playKuni(seed, { care: 'none' })); }
+  const f = summary(full), n = summary(none);
+  console.log(`  [測定] 世話する子 : カード全部 中央 ${f.cards} 日 / 地図 49マス 中央 ${f.tiles} 日 (最短 ${f.tilesMin} / 最長 ${f.tilesMax}) / 役所 Lv2-5 ${f.lv.join(' / ')} 日`);
+  console.log(`  [測定] 世話しない子: カード全部 中央 ${n.cards} 日 / 地図 49マス 中央 ${n.tiles} 日 / 役所 Lv2-5 ${n.lv.join(' / ')} 日`);
   // 収入を絞った理由: 前の数字 (1マス3コイン・値段 30+12k+1.5k²) では 地図が 12 日で埋まった
-  assert.ok(median(tiles) >= 30 && median(tiles) <= 70, `地図が埋まるまで 30〜70 日のはず (${median(tiles)})`);
-  assert.ok(Math.max(...tiles) <= 90, `ゆっくりな子でも 90 日以内 (${Math.max(...tiles)})`);
-  assert.ok(median(cards) >= 5, `カードが早くそろいすぎ (${median(cards)} 日)`);
-  assert.ok(median(runs.map((r) => r.lv[5])) >= 30, 'Lv5 まで 30 日以上かかる');
+  assert.ok(f.tiles >= 30 && f.tiles <= 70, `世話する子は 地図が 30〜70 日で埋まる (${f.tiles})`);
+  assert.ok(n.tiles >= f.tiles + 5, `世話しないと 遅くなる (世話する ${f.tiles} 日 / しない ${n.tiles} 日)`);
+  assert.ok(n.tiles >= f.tiles * 1.4, `世話しないと ずっと遅い (${n.tiles} 日 は ${f.tiles} 日の 1.4 倍以上のはず)`);
+  assert.ok(n.tiles <= 110, `世話しなくても 100 日ちょっとで終わる (${n.tiles})`);
+  assert.ok(f.cards >= 5, `カードが早くそろいすぎ (${f.cards} 日)`);
+  assert.ok(f.lv[3] >= 30, 'Lv5 まで 30 日以上かかる');
 });
